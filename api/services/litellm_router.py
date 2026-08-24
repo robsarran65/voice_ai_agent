@@ -3,15 +3,15 @@
 # Voice AI Agent (Low/No-Cost Edition)
 # ============================================================
 # Owns *how* to call a chat model reliably: provider wiring, the fallback
-# attempt, and turning failure into a structured result.
+# attempt, tool-call plumbing, and turning failure into a structured result.
 #
-# It deliberately owns none of the *why*. Persona, model choice, and what
-# the user hears on failure are domain policy and live in
-# `api/core/persona.py`, passed in explicitly by the caller.
+# It owns none of the *why*. Persona, model choice, which tools exist, what
+# they do, and what the user hears on failure are all domain policy and live
+# in `api/core/`, passed in explicitly by the caller.
 
 import logging
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from litellm import completion
 
@@ -30,56 +30,77 @@ def _api_key() -> str | None:
 @dataclass(frozen=True)
 class LLMResult:
     """
-    Structured outcome of a chat completion.
+    Structured outcome of a completion.
 
-    Callers must branch on `ok`. The previous version returned the error
-    text as if it were the model's reply, so the route had no way to tell
-    a real answer from a failure — and spoke the exception aloud.
+    Callers must branch on `ok`. An earlier version returned the error text as
+    if it were the model's reply, so the route had no way to tell a real answer
+    from a failure — and spoke the exception aloud.
+
+    When the model wants a tool, `tool_calls` is populated and `text` is
+    usually empty. `assistant_message` is the raw turn to append to the
+    conversation before the tool results, which the provider requires.
     """
 
     ok: bool
     text: str | None = None
-    model: str | None = None  # which model actually answered
-    error: str | None = None  # operator-facing detail; never spoken to a user
+    model: str | None = None
+    error: str | None = None
+    tool_calls: list = field(default_factory=list)
+    assistant_message: dict | None = None
 
 
-def _attempt(
-    *,
-    api_key: str,
-    model: str,
-    system_prompt: str,
-    user_text: str,
-    max_tokens: int,
-    temperature: float,
-) -> str:
+def _attempt(*, api_key, model, messages, max_tokens, temperature, tools):
     """One completion call. Raises on failure — the caller decides what that means."""
-    response = completion(
+    kwargs = dict(
         model=model,
         api_key=api_key,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_text},
-        ],
+        messages=messages,
         max_tokens=max_tokens,
         temperature=temperature,
     )
-    return response["choices"][0]["message"]["content"]
+    if tools:
+        kwargs["tools"] = tools
+        kwargs["tool_choice"] = "auto"
+
+    response = completion(**kwargs)
+    choice = response["choices"][0]["message"]
+
+    # litellm returns a model object here; normalise to plain dicts so the
+    # rest of the app never depends on the SDK's types.
+    calls = []
+    for call in (getattr(choice, "tool_calls", None) or []):
+        calls.append({
+            "id": call.id,
+            "name": call.function.name,
+            "arguments": call.function.arguments,
+        })
+
+    assistant = {"role": "assistant", "content": choice.get("content") or ""}
+    if calls:
+        assistant["tool_calls"] = [
+            {"id": c["id"], "type": "function",
+             "function": {"name": c["name"], "arguments": c["arguments"]}}
+            for c in calls
+        ]
+
+    return choice.get("content"), calls, assistant
 
 
-def complete_chat(
+def complete_messages(
     *,
-    system_prompt: str,
-    user_text: str,
+    messages: list,
     model: str,
     max_tokens: int,
     temperature: float,
     fallback_model: str | None = None,
+    tools: list | None = None,
 ) -> LLMResult:
     """
-    Run a single-turn chat completion, optionally retrying on a fallback model.
+    Run a completion over an explicit message list, optionally offering tools.
 
-    Every input is explicit — no module-level persona or model defaults — so
-    different product flows can share this without sharing each other's policy.
+    This is the composable primitive: a tool loop needs to send the whole
+    conversation back each turn, which a system-prompt-plus-one-string call
+    cannot express.
     """
     api_key = _api_key()
     if not api_key:
@@ -92,17 +113,40 @@ def complete_chat(
 
     for candidate in attempts:
         try:
-            text = _attempt(
+            text, calls, assistant = _attempt(
                 api_key=api_key,
                 model=candidate,
-                system_prompt=system_prompt,
-                user_text=user_text,
+                messages=messages,
                 max_tokens=max_tokens,
                 temperature=temperature,
+                tools=tools,
             )
-            return LLMResult(ok=True, text=text, model=candidate)
+            return LLMResult(ok=True, text=text, model=candidate,
+                             tool_calls=calls, assistant_message=assistant)
         except Exception as exc:
             log.warning("LLM call failed on %s: %s", candidate, exc)
             errors.append(f"{candidate}: {exc}")
 
     return LLMResult(ok=False, error=" | ".join(errors))
+
+
+def complete_chat(
+    *,
+    system_prompt: str,
+    user_text: str,
+    model: str,
+    max_tokens: int,
+    temperature: float,
+    fallback_model: str | None = None,
+) -> LLMResult:
+    """Single-turn convenience wrapper over `complete_messages`."""
+    return complete_messages(
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_text},
+        ],
+        model=model,
+        max_tokens=max_tokens,
+        temperature=temperature,
+        fallback_model=fallback_model,
+    )

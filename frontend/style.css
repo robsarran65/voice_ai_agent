@@ -38,6 +38,9 @@
     /* ---- rhythm ---- */
     --shell: 62rem;
     --gap: clamp(1rem, 2.5vw, 1.75rem);
+    /* One source of truth for the banner height: the seal sizes itself from
+       this, so it can never outgrow the strip it sits on. */
+    --banner-h: clamp(96px, 15vw, 190px);
 }
 
 *, *::before, *::after { box-sizing: border-box; }
@@ -74,7 +77,7 @@ body {
 .masthead__banner {
     display: block;
     width: 100%;
-    height: clamp(96px, 15vw, 190px);
+    height: var(--banner-h);
     /* The lettering was removed from the artwork, so there is no longer a
        phrase that has to survive cropping. Centring keeps the circuit-and-leaf
        braid — the characteristic part — in frame on narrow viewports. */
@@ -84,31 +87,38 @@ body {
 }
 
 .masthead__plate {
-    display: flex;
-    /* Bottom-aligned, not centred: the seal overlaps the banner edge while
-       the type stays entirely on the metal, where it is legible. */
-    align-items: flex-end;
-    gap: clamp(0.85rem, 2.5vw, 1.4rem);
     max-width: var(--shell);
     margin: 0 auto;
-    padding: 0 var(--gap);
-    transform: translateY(clamp(-40px, -5.5vw, -26px));
+    padding: 0.85rem var(--gap) 0;
 }
 
+/* The seal is its own element rather than part of the artwork, so cropping
+   the banner can never crop it away. Sized from --banner-h and centred on
+   the strip, it stays fully on the banner at every width. */
 .masthead__logo {
-    width: clamp(72px, 12vw, 104px);
-    height: clamp(72px, 12vw, 104px);
+    position: absolute;
+    /* Half the banner height, not 50% of the masthead — the masthead also
+       contains the wordmark below the strip, so a percentage would centre
+       the seal on the wrong box and overhang the banner's lower edge. */
+    top: calc(var(--banner-h) / 2);
+    right: clamp(0.75rem, 3vw, 2.5rem);
+    transform: translateY(-50%);
+    width: calc(var(--banner-h) * 0.74);
+    height: calc(var(--banner-h) * 0.74);
     border-radius: 50%;
     /* The mark is drawn as a circle inside a square plate — clipping to a
        circle keeps its own geometry instead of boxing it. */
     object-fit: cover;
     border: 1px solid var(--edge-strong);
-    box-shadow: var(--shadow-panel), inset 0 0 0 1px rgba(255, 255, 255, 0.6);
+    /* Reads as a seal set down on the artwork: a soft halo lifts it clear of
+       the robot arm it overlaps on wide screens. */
+    box-shadow: 0 2px 10px rgba(11, 28, 55, 0.35),
+                0 0 0 6px rgba(244, 246, 247, 0.5),
+                inset 0 0 0 1px rgba(255, 255, 255, 0.6);
     background: var(--brand-metal-hi);
-    flex-shrink: 0;
 }
 
-.masthead__id { padding-bottom: 0.35rem; }
+.masthead__id { padding-bottom: 0; }
 
 .masthead__company {
     margin: 0;
@@ -138,9 +148,7 @@ body {
 .shell {
     max-width: var(--shell);
     margin: 0 auto;
-    padding: 0 var(--gap) calc(var(--gap) * 2.5);
-    /* Cancel the masthead's negative pull so content keeps normal rhythm. */
-    margin-top: clamp(-28px, -4vw, -14px);
+    padding: var(--gap) var(--gap) calc(var(--gap) * 2.5);
 }
 
 /* ============================================================
