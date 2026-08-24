@@ -33,6 +33,11 @@ client product with email/calendar capabilities, modeled in part on `C:\Users\ro
    whether `frontend/app.js`'s `BACKEND_URL` logic (localhost vs. relative path) actually
    resolves correctly once both are served from one Vercel domain, and whether the FastAPI
    app works as a Vercel Python serverless function as currently structured.
+   - **Two routing bugs fixed since, still unverified on Vercel itself:** the catch-all
+     `/(.*)` sent *every* path to `index.html`, so `app.js`, `style.css` and `/assets/*`
+     would all have been served HTML; and `"src": "/voice-chat"` could not match the
+     `/voice-chat/` the frontend actually posts to. Both corrected in `vercel.json`, but
+     nobody has deployed it yet — treat this item as open until someone does.
 4. **Email/calendar capabilities not started.** Client wants this eventually, modeled on
    jarvis-2's `gcal.py`/`gmail.py`/`google_auth.py`. Jarvis 2 uses a **desktop, one-time-setup
    OAuth flow** (run a script once, get a local `token.json`) — that does **not** map directly
@@ -48,9 +53,12 @@ client product with email/calendar capabilities, modeled in part on `C:\Users\ro
    (`litellm`/`python-dotenv` missing from whichever env `uvicorn` actually resolves to).
    A project-local virtualenv would remove this whole class of bug before it matters for
    deployment.
-7. **No customer branding/theming yet.** Need a `style.css` for the frontend so the demo
-   (and eventually per-client deployments) can be white-labeled/branded instead of using
-   unstyled default HTML.
+7. ~~**No customer branding/theming yet.**~~ **Resolved.** `frontend/style.css` now carries
+   the MunAI identity — every colour in it was sampled out of `frontend/assets/munai-logo.jpg`
+   and `munai-banner.jpg`, so the page is made of the same brushed metal, navy linework and
+   teal circuitry as the mark. To rebrand for another client, edit only the `--brand-*` block
+   at the top of the stylesheet and swap the two files in `frontend/assets/`; nothing below
+   that block hardcodes a brand colour.
 
 ## Service-layer pass (done)
 

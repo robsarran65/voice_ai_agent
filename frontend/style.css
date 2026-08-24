@@ -1,0 +1,572 @@
+/* ============================================================
+   Candy — MunAI Solutions LLC
+   ============================================================
+   Every colour below was sampled directly out of the two brand
+   assets in /assets, so the page and the logo are made of the
+   same material: brushed metal, navy linework, teal circuitry.
+
+   WHITE-LABELLING (roadmap item 7)
+   To rebrand this demo for another client, change only the
+   `--brand-*` block and swap the two files in /assets. Nothing
+   below that block hardcodes a brand colour.
+   ============================================================ */
+
+:root {
+    /* ---- brand: the only block to edit per client ---- */
+    --brand-ink: #0b1c37;        /* deepest navy — logo linework */
+    --brand-ink-soft: #213b55;   /* mid navy — secondary text */
+    --brand-accent: #186474;     /* deep teal — banner circuitry */
+    --brand-accent-lit: #4daaad; /* lit teal — active traces */
+    --brand-accent-glow: #70c6c8;/* brightest teal — glow */
+    --brand-leaf: #6faf5d;       /* leaf green — "live" only */
+    --brand-metal-hi: #f4f6f7;   /* brushed metal, highlight */
+    --brand-metal: #dbdfe2;      /* brushed metal, mid */
+    --brand-metal-lo: #c2c6cb;   /* brushed metal, shadow */
+
+    /* ---- derived ---- */
+    --edge: rgba(11, 28, 55, 0.14);
+    --edge-strong: rgba(11, 28, 55, 0.28);
+    --lift: 0 1px 0 rgba(255, 255, 255, 0.9);
+    --shadow-panel: 0 1px 2px rgba(11, 28, 55, 0.06),
+                    0 8px 24px -12px rgba(11, 28, 55, 0.28);
+
+    /* ---- type ---- */
+    --font-display: "Sora", "Segoe UI", system-ui, sans-serif;
+    --font-body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", monospace;
+
+    /* ---- rhythm ---- */
+    --shell: 62rem;
+    --gap: clamp(1rem, 2.5vw, 1.75rem);
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+    margin: 0;
+    font-family: var(--font-body);
+    color: var(--brand-ink);
+    background: var(--brand-metal);
+    line-height: 1.55;
+    /* Brushed metal, built rather than imaged: fine vertical grain over a
+       soft diagonal sheen, so it tiles at any viewport size and costs
+       nothing to download. */
+    background-image:
+        repeating-linear-gradient(90deg,
+            rgba(255, 255, 255, 0.5) 0 1px,
+            rgba(255, 255, 255, 0) 1px 3px),
+        radial-gradient(120% 70% at 50% -10%,
+            var(--brand-metal-hi) 0%,
+            var(--brand-metal) 55%,
+            var(--brand-metal-lo) 100%);
+    background-attachment: fixed;
+    min-height: 100vh;
+}
+
+/* ============================================================
+   Masthead — the banner is the brand promise, so it leads
+   ============================================================ */
+
+.masthead { position: relative; }
+
+.masthead__banner {
+    display: block;
+    width: 100%;
+    height: clamp(96px, 15vw, 190px);
+    /* The tagline and robot hand sit on the banner's right edge; anchoring
+       there keeps the promise readable when the viewport crops the art. */
+    object-fit: cover;
+    object-position: right center;
+    border-bottom: 1px solid var(--edge-strong);
+}
+
+.masthead__plate {
+    display: flex;
+    /* Bottom-aligned, not centred: the seal overlaps the banner edge while
+       the type stays entirely on the metal, where it is legible. */
+    align-items: flex-end;
+    gap: clamp(0.85rem, 2.5vw, 1.4rem);
+    max-width: var(--shell);
+    margin: 0 auto;
+    padding: 0 var(--gap);
+    transform: translateY(clamp(-40px, -5.5vw, -26px));
+}
+
+.masthead__logo {
+    width: clamp(72px, 12vw, 104px);
+    height: clamp(72px, 12vw, 104px);
+    border-radius: 50%;
+    /* The mark is drawn as a circle inside a square plate — clipping to a
+       circle keeps its own geometry instead of boxing it. */
+    object-fit: cover;
+    border: 1px solid var(--edge-strong);
+    box-shadow: var(--shadow-panel), inset 0 0 0 1px rgba(255, 255, 255, 0.6);
+    background: var(--brand-metal-hi);
+    flex-shrink: 0;
+}
+
+.masthead__id { padding-bottom: 0.35rem; }
+
+.masthead__company {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: clamp(0.66rem, 1.7vw, 0.75rem);
+    font-weight: 600;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--brand-accent);
+    text-shadow: var(--lift);
+}
+
+.masthead__product {
+    margin: 0.1rem 0 0;
+    font-family: var(--font-display);
+    font-size: clamp(1.5rem, 5vw, 2.1rem);
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    line-height: 1;
+    text-shadow: var(--lift);
+}
+
+/* ============================================================
+   Shell
+   ============================================================ */
+
+.shell {
+    max-width: var(--shell);
+    margin: 0 auto;
+    padding: 0 var(--gap) calc(var(--gap) * 2.5);
+    /* Cancel the masthead's negative pull so content keeps normal rhythm. */
+    margin-top: clamp(-28px, -4vw, -14px);
+}
+
+/* ============================================================
+   Console — the signature element
+   ============================================================
+   A brushed-metal disc ringed by circuit traces, echoing the
+   concentric rings and radiating shoulder-circuitry of the logo.
+   It reports the real pipeline stage, so it is an instrument,
+   not an ornament.
+   ============================================================ */
+
+.console {
+    display: grid;
+    justify-items: center;
+    gap: 1.15rem;
+    padding: clamp(1.4rem, 3.2vw, 2rem) var(--gap);
+    background:
+        repeating-linear-gradient(90deg,
+            rgba(255, 255, 255, 0.42) 0 1px,
+            rgba(255, 255, 255, 0) 1px 3px),
+        linear-gradient(180deg, var(--brand-metal-hi), var(--brand-metal));
+    border: 1px solid var(--edge);
+    border-radius: 18px;
+    box-shadow: var(--shadow-panel), inset 0 1px 0 rgba(255, 255, 255, 0.85);
+}
+
+/* Above the fold on a laptop the orb should not float alone in a wide
+   plate — pair it with the controls so the console reads as one
+   instrument rather than a logo in a box. */
+@media (min-width: 46rem) {
+    .console {
+        grid-template-columns: auto minmax(0, 1fr);
+        justify-items: start;
+        align-items: center;
+        gap: clamp(1.5rem, 4vw, 2.75rem);
+        padding: clamp(1.6rem, 3vw, 2.1rem) clamp(1.75rem, 4vw, 2.75rem);
+    }
+}
+
+/* Declared after the media query above, so keep the desktop overrides
+   together in the block below — a later base rule of equal specificity
+   would otherwise win and re-centre these on wide screens. */
+.console__panel {
+    display: grid;
+    gap: 0.9rem;
+    justify-items: center;
+    text-align: center;
+}
+
+@media (min-width: 46rem) {
+    .console__panel { justify-items: start; text-align: left; }
+}
+
+.console__lead {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: clamp(1.05rem, 2.6vw, 1.3rem);
+    font-weight: 600;
+    line-height: 1.35;
+    letter-spacing: -0.01em;
+    text-shadow: var(--lift);
+    max-width: 26ch;
+}
+
+.console__hint {
+    margin: -0.35rem 0 0;
+    font-size: 0.92rem;
+    color: var(--brand-ink-soft);
+    max-width: 42ch;
+}
+
+/* ---- the orb ---- */
+
+.orb {
+    position: relative;
+    width: clamp(132px, 30vw, 168px);
+    height: clamp(132px, 30vw, 168px);
+    display: grid;
+    place-items: center;
+}
+
+.orb__ring,
+.orb__disc { position: absolute; border-radius: 50%; }
+
+.orb__ring {
+    inset: 0;
+    border: 1.5px solid var(--edge-strong);
+    /* Second, inset ring mirrors the logo's double outline. */
+    box-shadow: inset 0 0 0 7px transparent,
+                inset 0 0 0 8px rgba(24, 100, 116, 0.35);
+}
+
+.orb__disc {
+    inset: 14%;
+    background:
+        conic-gradient(from 210deg,
+            var(--brand-metal-lo), var(--brand-metal-hi) 25%,
+            var(--brand-metal-lo) 50%, var(--brand-metal-hi) 75%,
+            var(--brand-metal-lo));
+    border: 1px solid var(--edge);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9),
+                0 4px 14px -8px rgba(11, 28, 55, 0.5);
+}
+
+/* Traces radiate through the gap between the outer ring and the disc,
+   like the circuitry across the logo's shoulders. Their height stops at
+   the disc edge — running them to the centre would just hide them
+   underneath it. */
+.orb__trace {
+    position: absolute;
+    width: 2px;
+    height: 22%;
+    top: 6%;
+    left: calc(50% - 1px);
+    /* Rotate about the orb's centre, not the trace's own end. */
+    transform-origin: 50% 200%;
+    background: linear-gradient(180deg,
+        rgba(77, 170, 173, 0) 0%,
+        var(--brand-accent-lit) 60%,
+        var(--brand-accent) 100%);
+    opacity: 0.3;
+    border-radius: 2px;
+}
+
+.orb__trace::after {
+    content: "";
+    position: absolute;
+    bottom: -3px;
+    left: -2px;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--brand-accent-lit);
+    box-shadow: 0 0 5px rgba(112, 198, 200, 0.7);
+    /* Node caps, matching the dotted junctions in the logo's brain. */
+}
+
+.orb__core {
+    position: relative;
+    width: 34%;
+    height: 34%;
+    border-radius: 50%;
+    background: radial-gradient(circle at 38% 32%,
+        var(--brand-accent-glow), var(--brand-accent) 68%);
+    box-shadow: 0 0 0 6px rgba(112, 198, 200, 0.14),
+                0 2px 8px rgba(11, 28, 55, 0.4);
+}
+
+/* ---- orb states: driven by the real pipeline stage ---- */
+
+.orb[data-state="listening"] .orb__trace { animation: trace-sweep 1.5s ease-in-out infinite; }
+.orb[data-state="listening"] .orb__core  { animation: core-pulse 1.5s ease-in-out infinite; }
+
+.orb[data-state="thinking"] .orb__trace  { animation: trace-chase 1.1s linear infinite; }
+.orb[data-state="thinking"] .orb__core   { animation: core-dim 1.1s ease-in-out infinite; }
+
+.orb[data-state="speaking"] .orb__trace  { animation: trace-speak 0.62s ease-in-out infinite; }
+.orb[data-state="speaking"] .orb__core   { animation: core-pulse 0.62s ease-in-out infinite; }
+
+.orb[data-state="error"] .orb__core,
+.orb[data-state="blocked"] .orb__core {
+    background: radial-gradient(circle at 38% 32%, #c2c6cb, #8b9199 70%);
+    box-shadow: 0 0 0 6px rgba(11, 28, 55, 0.06), 0 2px 8px rgba(11, 28, 55, 0.3);
+}
+
+/* Per-trace offsets so the sweep travels around the ring rather than
+   flashing all twelve at once. */
+.orb__trace:nth-child(1)  { transform: rotate(0deg);   animation-delay: 0s; }
+.orb__trace:nth-child(2)  { transform: rotate(30deg);  animation-delay: 0.06s; }
+.orb__trace:nth-child(3)  { transform: rotate(60deg);  animation-delay: 0.12s; }
+.orb__trace:nth-child(4)  { transform: rotate(90deg);  animation-delay: 0.18s; }
+.orb__trace:nth-child(5)  { transform: rotate(120deg); animation-delay: 0.24s; }
+.orb__trace:nth-child(6)  { transform: rotate(150deg); animation-delay: 0.30s; }
+.orb__trace:nth-child(7)  { transform: rotate(180deg); animation-delay: 0.36s; }
+.orb__trace:nth-child(8)  { transform: rotate(210deg); animation-delay: 0.42s; }
+.orb__trace:nth-child(9)  { transform: rotate(240deg); animation-delay: 0.48s; }
+.orb__trace:nth-child(10) { transform: rotate(270deg); animation-delay: 0.54s; }
+.orb__trace:nth-child(11) { transform: rotate(300deg); animation-delay: 0.60s; }
+.orb__trace:nth-child(12) { transform: rotate(330deg); animation-delay: 0.66s; }
+
+@keyframes trace-sweep { 0%, 100% { opacity: 0.18; } 50% { opacity: 0.95; } }
+@keyframes trace-chase { 0% { opacity: 0.9; } 22%, 100% { opacity: 0.14; } }
+@keyframes trace-speak { 0%, 100% { opacity: 0.3; } 40% { opacity: 1; } }
+@keyframes core-pulse {
+    0%, 100% { box-shadow: 0 0 0 5px rgba(112, 198, 200, 0.12), 0 2px 8px rgba(11, 28, 55, 0.4); }
+    50%      { box-shadow: 0 0 0 13px rgba(112, 198, 200, 0.02), 0 2px 8px rgba(11, 28, 55, 0.4); }
+}
+@keyframes core-dim { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
+
+/* ---- status line: names the true pipeline stage ---- */
+
+.status {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--brand-ink-soft);
+    min-height: 1.5rem;
+    text-align: center;
+}
+
+.status__dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--brand-ink-soft);
+    opacity: 0.4;
+    flex-shrink: 0;
+}
+
+.status[data-state="listening"] .status__dot,
+.status[data-state="speaking"] .status__dot { background: var(--brand-leaf); opacity: 1; }
+.status[data-state="thinking"] .status__dot { background: var(--brand-accent-lit); opacity: 1; }
+.status[data-state="error"] .status__dot,
+.status[data-state="blocked"] .status__dot  { background: var(--brand-ink); opacity: 0.55; }
+
+/* ---- controls ---- */
+
+.controls { display: flex; gap: 0.7rem; flex-wrap: wrap; justify-content: center; }
+
+.btn {
+    font-family: var(--font-display);
+    font-size: 0.95rem;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    padding: 0.72rem 1.6rem;
+    border-radius: 999px;
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: transform 0.12s ease, box-shadow 0.16s ease,
+                background-color 0.16s ease, opacity 0.16s ease;
+}
+
+.btn:focus-visible {
+    outline: 2px solid var(--brand-ink);
+    outline-offset: 3px;
+}
+
+.btn--primary {
+    color: var(--brand-metal-hi);
+    background: linear-gradient(180deg, var(--brand-ink-soft), var(--brand-ink));
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.5),
+                0 6px 18px -8px rgba(11, 28, 55, 0.8);
+}
+
+.btn--primary:hover:not(:disabled) { transform: translateY(-1px); }
+.btn--primary:active:not(:disabled) { transform: translateY(0); }
+
+.btn--ghost {
+    color: var(--brand-ink);
+    background: rgba(255, 255, 255, 0.5);
+    border-color: var(--edge-strong);
+}
+
+.btn--ghost:hover:not(:disabled) { background: rgba(255, 255, 255, 0.85); }
+
+.btn:disabled { opacity: 0.32; cursor: not-allowed; box-shadow: none; }
+
+/* ============================================================
+   Exchange — what Candy heard, and what Candy said
+   ============================================================ */
+
+.exchange {
+    display: grid;
+    gap: var(--gap);
+    margin-top: var(--gap);
+    grid-template-columns: 1fr;
+}
+
+@media (min-width: 46rem) {
+    /* The reply earns more room than the transcript: it is the product. */
+    .exchange { grid-template-columns: 4fr 5fr; }
+}
+
+.panel {
+    padding: 1.15rem 1.3rem 1.3rem;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0.42));
+    border: 1px solid var(--edge);
+    border-radius: 14px;
+    box-shadow: var(--shadow-panel);
+    min-width: 0;
+}
+
+.panel__label {
+    display: block;
+    margin: 0 0 0.6rem;
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    font-weight: 500;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--brand-accent);
+}
+
+.panel__body {
+    margin: 0;
+    min-height: 3.2rem;
+    overflow-wrap: anywhere;
+}
+
+/* Monospace for the transcript: this is the machine reporting what it
+   heard, and it should read as a readout, not as prose. */
+.panel--heard .panel__body {
+    font-family: var(--font-mono);
+    font-size: 0.92rem;
+    color: var(--brand-ink-soft);
+}
+
+.panel--reply { border-color: rgba(24, 100, 116, 0.3); }
+
+.panel--reply .panel__body {
+    font-size: clamp(1.05rem, 2.4vw, 1.2rem);
+    line-height: 1.5;
+}
+
+.panel__body:empty::before,
+.panel__body[data-empty="true"]::before {
+    content: attr(data-placeholder);
+    color: var(--brand-ink-soft);
+    opacity: 0.5;
+    font-style: normal;
+}
+
+/* Degraded reply — Candy answered from the failure path, not the model.
+   Driven by the `ok` flag the API now returns. */
+.panel--reply[data-ok="false"] {
+    border-color: rgba(11, 28, 55, 0.22);
+    /* Muted rather than alarmed: the brand has no red, and a fallback
+       reply is a degraded answer, not a crash. The drained left edge and
+       the meta line together make it unmistakable. */
+    border-left: 3px solid var(--brand-ink-soft);
+    background: linear-gradient(180deg, rgba(219, 223, 226, 0.6), rgba(194, 198, 203, 0.45));
+}
+
+.panel--reply[data-ok="false"] .panel__label { color: var(--brand-ink-soft); }
+.panel--reply[data-ok="false"] .panel__body { color: var(--brand-ink-soft); }
+
+.panel__meta {
+    display: block;
+    margin-top: 0.85rem;
+    padding-top: 0.7rem;
+    border-top: 1px solid var(--edge);
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    letter-spacing: 0.06em;
+    color: var(--brand-ink-soft);
+    opacity: 0.75;
+    overflow-wrap: anywhere;
+}
+
+.panel__meta:empty { display: none; }
+
+/* ============================================================
+   Notice — unsupported browsers get direction, not a dead page
+   ============================================================ */
+
+.notice {
+    margin-top: var(--gap);
+    padding: 1.1rem 1.3rem;
+    background: rgba(255, 255, 255, 0.66);
+    border: 1px solid var(--edge-strong);
+    border-left: 3px solid var(--brand-accent);
+    border-radius: 12px;
+    box-shadow: var(--shadow-panel);
+}
+
+.notice[hidden] { display: none; }
+
+.notice__title {
+    margin: 0 0 0.35rem;
+    font-family: var(--font-display);
+    font-size: 1rem;
+    font-weight: 600;
+}
+
+.notice__body { margin: 0; font-size: 0.94rem; color: var(--brand-ink-soft); }
+
+/* ============================================================
+   Colophon
+   ============================================================ */
+
+.colophon {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem 0.9rem;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-top: calc(var(--gap) * 1.5);
+    padding-top: 1rem;
+    border-top: 1px solid var(--edge);
+    font-size: 0.78rem;
+    color: var(--brand-ink-soft);
+}
+
+.colophon__tag {
+    font-family: var(--font-display);
+    letter-spacing: 0.02em;
+}
+
+.colophon__note { font-family: var(--font-mono); font-size: 0.72rem; opacity: 0.7; }
+
+/* ============================================================
+   Accessibility floor
+   ============================================================ */
+
+.visually-hidden {
+    position: absolute;
+    width: 1px; height: 1px;
+    margin: -1px; padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    /* Keep the state legible without motion: traces hold a steady lit
+       level instead of animating, and the dot plus label still change. */
+    *, *::before, *::after {
+        animation-duration: 0.001ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.001ms !important;
+    }
+    .orb[data-state="listening"] .orb__trace,
+    .orb[data-state="thinking"] .orb__trace,
+    .orb[data-state="speaking"] .orb__trace { opacity: 0.85; }
+}

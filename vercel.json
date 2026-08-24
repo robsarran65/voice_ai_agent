@@ -6,18 +6,26 @@
       "use": "@vercel/python"
     },
     {
-      "src": "frontend/index.html",
+      "src": "frontend/**",
       "use": "@vercel/static"
     }
   ],
   "routes": [
     {
-      "src": "/voice-chat",
+      "src": "/voice-chat(/.*)?",
       "dest": "/api/index.py"
     },
     {
-      "src": "/health",
+      "src": "/health(/.*)?",
       "dest": "/api/index.py"
+    },
+    {
+      "src": "/assets/(.*)",
+      "dest": "/frontend/assets/$1"
+    },
+    {
+      "src": "/(.+\\.(?:js|css|png|jpe?g|svg|ico|webp|woff2?))",
+      "dest": "/frontend/$1"
     },
     {
       "src": "/(.*)",

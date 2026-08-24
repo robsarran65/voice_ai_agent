@@ -23,3 +23,6 @@ Thumbs.db
 # Local run artifacts
 *.log
 *.png
+
+# ...but brand assets are part of the product
+!frontend/assets/**

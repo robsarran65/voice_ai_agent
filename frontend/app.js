@@ -9,12 +9,57 @@ const startBtn = document.getElementById("start-btn");
 const stopBtn = document.getElementById("stop-btn");
 const transcriptBox = document.getElementById("transcript");
 const agentBox = document.getElementById("agent-response");
+const replyPanel = document.getElementById("reply-panel");
+const replyMeta = document.getElementById("reply-meta");
+const orb = document.getElementById("orb");
+const statusEl = document.getElementById("status");
+const statusText = document.getElementById("status-text");
+const consoleLead = document.getElementById("console-lead");
+const consoleHint = document.getElementById("console-hint");
+const notice = document.getElementById("notice");
+const noticeTitle = document.getElementById("notice-title");
+const noticeBody = document.getElementById("notice-body");
 
 // Confirmed via testing that no delay length fixes word-dropping on a
 // Bluetooth mic (tried up to 2.5s) — it's an OS/Bluetooth-stack
 // negotiation issue, not a capture-start timing issue. This is now
 // just a reasonable floor for wired/built-in mics, where it does help.
 const MIC_READY_DELAY_MS = 350;
+
+// -------------------------------
+// Pipeline state
+// -------------------------------
+// The orb and the status line report the stage the request is actually
+// in. Keeping the labels honest makes the demo debuggable in front of a
+// client — if it stalls, the label says which stage it stalled at.
+const STAGES = {
+    idle: "Ready",
+    starting: "Getting ready",
+    listening: "Listening — speak now",
+    thinking: "Thinking",
+    speaking: "Speaking",
+    error: "Something went wrong",
+    blocked: "Voice input unavailable",
+};
+
+function setStage(stage) {
+    orb.dataset.state = stage;
+    statusEl.dataset.state = stage;
+    statusText.textContent = STAGES[stage] || STAGES.idle;
+}
+
+// Writing through one helper keeps the empty-state placeholders in the
+// CSS working — an element only shows its placeholder while it's empty.
+function setText(el, text) {
+    el.textContent = text || "";
+    el.dataset.empty = text ? "false" : "true";
+}
+
+function showNotice(title, body) {
+    noticeTitle.textContent = title;
+    noticeBody.textContent = body;
+    notice.hidden = false;
+}
 
 // -------------------------------
 // Audio priming (shared by mic input and TTS output)
@@ -36,6 +81,10 @@ function getAudioCtx() {
 // low-quality HFP profile permanently instead of just while actively
 // listening). Removed — SpeechRecognition manages its own mic capture,
 // and a competing getUserMedia stream was doing more harm than good.
+//
+// The orb animation is deliberately NOT driven by live mic amplitude for
+// the same reason: an analyser node needs its own getUserMedia stream,
+// which is exactly what made things worse. It animates per stage instead.
 
 // An audible cue is a far more reliable "go" signal than on-screen text
 // (which requires the user to be looking at the page) for the exact
@@ -79,30 +128,47 @@ if ("webkitSpeechRecognition" in window) {
     // extra delay before the "go" cue accounts for that; tune
     // MIC_READY_DELAY_MS up/down based on how it tests in practice.
     recognition.onstart = () => {
-        transcriptBox.innerText = "Getting ready...";
+        setStage("starting");
         setTimeout(() => {
             beep();
-            transcriptBox.innerText = "Listening... speak now.";
+            setStage("listening");
         }, MIC_READY_DELAY_MS);
     };
 
     recognition.onresult = async (event) => {
         const text = event.results[event.results.length - 1][0].transcript;
-        transcriptBox.innerText = text;
+        setText(transcriptBox, text);
 
         // Send text to FastAPI backend
-        const agentReply = await sendToBackend(text);
+        setStage("thinking");
+        const reply = await sendToBackend(text);
 
         // Display agent response
-        agentBox.innerText = agentReply;
+        setText(agentBox, reply.message);
+        replyPanel.dataset.ok = String(reply.ok);
+        replyMeta.textContent = reply.meta;
 
         // Speak agent response
-        speak(agentReply);
+        speak(reply.message);
     };
 
     recognition.onerror = (event) => {
         console.error("Speech recognition error:", event.error);
-        transcriptBox.innerText = `Speech recognition error: ${event.error}`;
+        setStage("error");
+        // `no-speech` and `aborted` are ordinary outcomes, not faults —
+        // saying "error" for those would train the user to distrust the
+        // indicator.
+        if (event.error === "not-allowed" || event.error === "service-not-allowed") {
+            showNotice(
+                "Microphone access is blocked",
+                "Allow microphone access for this page in your browser's site settings, then press Start listening again."
+            );
+        } else if (event.error !== "no-speech" && event.error !== "aborted") {
+            showNotice(
+                "Speech recognition stopped",
+                `The browser reported: ${event.error}. Press Start listening to try again.`
+            );
+        }
     };
 
     // continuous=false means recognition stops itself after one
@@ -112,9 +178,24 @@ if ("webkitSpeechRecognition" in window) {
         listening = false;
         startBtn.disabled = false;
         stopBtn.disabled = true;
+        // Don't stomp on a later stage: by the time recognition ends we may
+        // already be thinking or speaking about what it captured.
+        if (["starting", "listening"].includes(orb.dataset.state)) setStage("idle");
     };
 } else {
-    alert("Chrome Speech Recognition API not supported in this browser.");
+    // Roadmap item 1: iOS Safari has no webkitSpeechRecognition at all, so
+    // this is the state most phone users land in. An alert() left the page
+    // looking broken; an explanation on the page tells them what to do.
+    startBtn.disabled = true;
+    stopBtn.disabled = true;
+    setStage("blocked");
+    // Telling someone to press a button that is disabled reads as a bug.
+    consoleLead.textContent = "Candy can't listen in this browser.";
+    consoleHint.textContent = "The controls stay disabled until you open the demo somewhere speech capture is available.";
+    showNotice(
+        "This browser can't capture speech",
+        "Candy's voice input uses the Chrome speech recognition API, which isn't available here — including on iPhone and iPad, where every browser uses Safari's engine underneath. Open this page in Chrome on a desktop to run the demo."
+    );
 }
 
 // -------------------------------
@@ -123,6 +204,7 @@ if ("webkitSpeechRecognition" in window) {
 startBtn.onclick = () => {
     if (!listening) {
         listening = true;
+        notice.hidden = true;
         recognition.start();
         startBtn.disabled = true;
         stopBtn.disabled = false;
@@ -138,6 +220,7 @@ stopBtn.onclick = () => {
         recognition.stop();
         startBtn.disabled = false;
         stopBtn.disabled = true;
+        setStage("idle");
     }
 };
 
@@ -153,6 +236,9 @@ const BACKEND_URL =
         ? "http://127.0.0.1:8000/voice-chat/"
         : "/voice-chat/";
 
+// Everything Candy might say out loud has to survive being spoken, so the
+// failure branches return a plain sentence rather than a status code. The
+// technical detail goes to `meta` and the console, where it belongs.
 async function sendToBackend(text) {
     try {
         const response = await fetch(BACKEND_URL, {
@@ -166,14 +252,31 @@ async function sendToBackend(text) {
         if (!response.ok) {
             const body = await response.text();
             console.error("Backend returned an error:", response.status, body);
-            return `Backend error ${response.status}: ${body}`;
+            return {
+                ok: false,
+                message: "I couldn't reach my backend just then. Give it another try.",
+                meta: `Backend responded ${response.status}`,
+            };
         }
 
         const data = await response.json();
-        return data.agent_message || "No response from agent.";
+        return {
+            // The API reports `ok: false` when the reply came from its
+            // failure path rather than the model, so the panel can look
+            // different even though both arrive as HTTP 200.
+            ok: data.ok !== false,
+            message: data.agent_message || "No response from agent.",
+            meta: data.ok === false
+                ? "Model unreachable — this came from Candy's fallback"
+                : (data.model ? `Answered by ${data.model}` : ""),
+        };
     } catch (err) {
         console.error("Backend error:", err);
-        return `Error contacting backend (${BACKEND_URL}): ${err.message}`;
+        return {
+            ok: false,
+            message: "I can't reach my backend from here. Check that it's running, then try again.",
+            meta: `No response from ${BACKEND_URL}`,
+        };
     }
 }
 
@@ -231,5 +334,10 @@ function speak(text) {
     if (ttsVoice) utterance.voice = ttsVoice;
     utterance.rate = 1.0;
     utterance.pitch = 1.0;
+    // Drive the orb from the utterance itself rather than guessing at a
+    // duration, so the animation stops exactly when Candy stops talking.
+    utterance.onstart = () => setStage("speaking");
+    utterance.onend = () => setStage("idle");
+    utterance.onerror = () => setStage("idle");
     speechSynthesis.speak(utterance);
 }

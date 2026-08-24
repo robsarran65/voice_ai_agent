@@ -1,19 +1,96 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Candy</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Candy — MunAI Solutions LLC</title>
+    <meta name="description" content="Candy, the voice assistant from MunAI Solutions LLC. Press start, speak, and hear the answer.">
+    <link rel="icon" href="assets/munai-logo.jpg">
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet"
+          href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+    <link rel="stylesheet" href="style.css">
     <script defer src="app.js"></script>
 </head>
 <body>
-    <h1>Candy</h1>
 
-    <button id="start-btn">Start Listening</button>
-    <button id="stop-btn" disabled>Stop Listening</button>
+<header class="masthead">
+    <img class="masthead__banner"
+         src="assets/munai-banner.jpg"
+         alt="MunAI Solutions: empowering humans through AI.">
+    <div class="masthead__plate">
+        <img class="masthead__logo" src="assets/munai-logo.jpg" alt="MunAI Solutions LLC">
+        <div class="masthead__id">
+            <p class="masthead__company">MunAI Solutions LLC</p>
+            <h1 class="masthead__product">Candy</h1>
+        </div>
+    </div>
+</header>
 
-    <h3>Your Speech:</h3>
-    <div id="transcript" style="padding:10px; border:1px solid #ccc;"></div>
+<main class="shell">
 
-    <h3>Agent Response:</h3>
-    <div id="agent-response" style="padding:10px; border:1px solid #ccc;"></div>
+    <section class="console" aria-labelledby="console-heading">
+        <h2 id="console-heading" class="visually-hidden">Talk to Candy</h2>
+
+        <!-- Twelve traces radiating from a brushed disc, echoing the
+             circuitry on the logo's shoulders. Decorative: the status
+             line below carries the same information as text. -->
+        <div class="orb" id="orb" data-state="idle" aria-hidden="true">
+            <span class="orb__ring"></span>
+            <span class="orb__disc"></span>
+            <span class="orb__trace"></span><span class="orb__trace"></span>
+            <span class="orb__trace"></span><span class="orb__trace"></span>
+            <span class="orb__trace"></span><span class="orb__trace"></span>
+            <span class="orb__trace"></span><span class="orb__trace"></span>
+            <span class="orb__trace"></span><span class="orb__trace"></span>
+            <span class="orb__trace"></span><span class="orb__trace"></span>
+            <span class="orb__core"></span>
+        </div>
+
+        <div class="console__panel">
+            <p class="console__lead" id="console-lead">Press start, then speak.</p>
+            <p class="console__hint" id="console-hint">Candy answers out loud. Wait for the tone before you begin — that's the moment she starts hearing you.</p>
+
+            <p class="status" id="status" data-state="idle" role="status">
+                <span class="status__dot"></span>
+                <span id="status-text">Ready</span>
+            </p>
+
+            <div class="controls">
+                <button id="start-btn" class="btn btn--primary" type="button">Start listening</button>
+                <button id="stop-btn" class="btn btn--ghost" type="button" disabled>Stop</button>
+            </div>
+        </div>
+    </section>
+
+    <div class="notice" id="notice" hidden>
+        <h2 class="notice__title" id="notice-title"></h2>
+        <p class="notice__body" id="notice-body"></p>
+    </div>
+
+    <section class="exchange">
+        <article class="panel panel--heard">
+            <h2 class="panel__label">What Candy heard</h2>
+            <p class="panel__body" id="transcript" data-empty="true"
+               data-placeholder="Your words appear here."></p>
+        </article>
+
+        <article class="panel panel--reply" id="reply-panel">
+            <h2 class="panel__label">Candy's answer</h2>
+            <p class="panel__body" id="agent-response" data-empty="true"
+               data-placeholder="Candy's reply appears here, and is spoken aloud."></p>
+            <span class="panel__meta" id="reply-meta"></span>
+        </article>
+    </section>
+
+    <footer class="colophon">
+        <span class="colophon__tag">Candy — a MunAI Solutions demo build</span>
+        <span class="colophon__note">Needs Chrome on desktop · iPhone and iPad aren't supported yet</span>
+    </footer>
+
+</main>
+
 </body>
 </html>
