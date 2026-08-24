@@ -33,18 +33,24 @@ def dated_persona(today: str, timezone: str) -> str:
         f"'tomorrow' or 'next Tuesday'."
     )
 
-# Direct to Anthropic, not through OpenRouter: one fewer network hop, and it
-# sidesteps OpenRouter's own account-level rate limiting (a real "in-flight
-# budget exhausted" failure hit during latency testing — unrelated to this
-# app, but it took the whole demo down with it).
+# Primary is direct to Anthropic, not through OpenRouter: one fewer network
+# hop, and it sidesteps OpenRouter's own account-level rate limiting (a real
+# "in-flight budget exhausted" failure hit during latency testing —
+# unrelated to this app, but it took the whole demo down with it).
 #
 # Haiku is primary. Measured back-to-back against Sonnet on this exact
 # persona+tools setup: ~1.5s vs ~2.7s per call, and a tool-using question
-# costs two calls — so this is roughly the difference between a 3s and a 5-6s
-# wait for "what's the weather". Sonnet is the fallback: slower but sturdier,
-# for the moments Haiku's own answer isn't good enough or the call fails.
+# costs two calls — so this is roughly the difference between a 3s and a
+# 5-6s wait for "what's the weather".
+#
+# The fallback deliberately goes through OpenRouter rather than staying on
+# Anthropic direct. The two failure modes that take down a *direct* provider
+# — this account's own Anthropic credit balance running out, or Anthropic
+# having an outage — do nothing to OpenRouter, since it's a different
+# account and a different path to the model entirely. A same-provider
+# fallback would share fate with whatever just failed.
 CANDY_MODEL = "anthropic/claude-haiku-4-5-20251001"
-CANDY_FALLBACK_MODEL = "anthropic/claude-sonnet-5"
+CANDY_FALLBACK_MODEL = "openrouter/anthropic/claude-sonnet-5"
 
 # Spoken replies get cut off if they run long, and long answers feel wrong
 # out loud regardless.
