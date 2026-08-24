@@ -17,8 +17,11 @@ echo.
 rem --- The dual-Python trap: whichever "python" is first on PATH is the
 rem     one that must have the packages, so check that exact one rather
 rem     than assuming.
+rem     Import the Google libraries too. api/index.py pulls them in at import
+rem     time via the tool layer, so if they're missing the API dies instantly
+rem     and the only evidence is a traceback in a window that's easy to miss.
 echo   Checking dependencies...
-python -c "import fastapi, uvicorn, litellm, dotenv, httpx" 2>nul
+python -c "import fastapi, uvicorn, litellm, dotenv, httpx, googleapiclient, google_auth_oauthlib" 2>nul
 if errorlevel 1 (
     echo.
     echo   [X] The 'python' on your PATH is missing packages Candy needs.
@@ -29,6 +32,20 @@ if errorlevel 1 (
     pause
     exit /b 1
 )
+
+rem     Catch anything else that breaks at import time - a syntax error in a
+rem     module, a bad .env - while the message can still be shown here.
+python -c "import api.index" 2>_startup_error.log
+if errorlevel 1 (
+    echo.
+    echo   [X] Candy's API failed to load. The error was:
+    echo.
+    type _startup_error.log
+    echo.
+    pause
+    exit /b 1
+)
+del _startup_error.log 2>nul
 
 if not exist ".env" (
     echo.
@@ -61,13 +78,20 @@ echo   Waiting for the API to answer...
 powershell -NoProfile -Command "foreach ($i in 1..40) { try { Invoke-WebRequest -Uri 'http://127.0.0.1:8000/health/' -UseBasicParsing -TimeoutSec 1 | Out-Null; exit 0 } catch { Start-Sleep -Milliseconds 500 } }; exit 1"
 if errorlevel 1 (
     echo.
-    echo   [!] The API did not answer in 20 seconds. Check the "Candy API"
-    echo       window for the error - the browser may show a backend error.
+    echo   [X] The API never answered on port 8000.
     echo.
-) else (
-    echo   API is up.
+    echo       NOT opening the browser. A page served without a working
+    echo       backend looks fine until you ask Candy something, and then
+    echo       reports "I can't reach my backend from here" - which hides
+    echo       the real error.
+    echo.
+    echo       Read the "Candy API" window: the reason is printed there.
+    echo.
+    pause
+    exit /b 1
 )
 
+echo   API is up.
 echo   Opening the browser...
 start "" "http://127.0.0.1:8899/"
 
