@@ -38,6 +38,7 @@ const STAGES = {
     listening: "Listening — speak now",
     thinking: "Thinking",
     speaking: "Speaking",
+    unheard: "Didn't catch that — try again",
     error: "Something went wrong",
     blocked: "Voice input unavailable",
 };
@@ -153,20 +154,42 @@ if ("webkitSpeechRecognition" in window) {
     };
 
     recognition.onerror = (event) => {
-        console.error("Speech recognition error:", event.error);
+        const err = event.error;
+        console.warn("Speech recognition ended with:", err);
+
+        // The API reports ordinary outcomes through the same channel as real
+        // faults. Saying "Something went wrong" when a user simply paused, or
+        // pressed Stop, teaches them to distrust the indicator — so these two
+        // are handled before anything is called an error.
+        if (err === "aborted") {
+            setStage("idle");
+            return;
+        }
+        if (err === "no-speech") {
+            setStage("unheard");
+            return;
+        }
+
         setStage("error");
-        // `no-speech` and `aborted` are ordinary outcomes, not faults —
-        // saying "error" for those would train the user to distrust the
-        // indicator.
-        if (event.error === "not-allowed" || event.error === "service-not-allowed") {
+        if (err === "not-allowed" || err === "service-not-allowed") {
             showNotice(
                 "Microphone access is blocked",
-                "Allow microphone access for this page in your browser's site settings, then press Start listening again."
+                "Allow microphone access for this page in your browser's site settings, then press Talk to Candy again."
             );
-        } else if (event.error !== "no-speech" && event.error !== "aborted") {
+        } else if (err === "audio-capture") {
+            showNotice(
+                "No microphone found",
+                "Connect a microphone and check it's selected as the input device, then press Talk to Candy again."
+            );
+        } else if (err === "network") {
+            showNotice(
+                "Speech recognition needs a connection",
+                "Chrome sends audio to Google's servers to transcribe it, and that request failed. Check your internet connection, then press Talk to Candy again."
+            );
+        } else {
             showNotice(
                 "Speech recognition stopped",
-                `The browser reported: ${event.error}. Press Start listening to try again.`
+                `The browser reported: ${err}. Press Talk to Candy to try again.`
             );
         }
     };

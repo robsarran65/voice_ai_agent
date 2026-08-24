@@ -75,10 +75,11 @@ body {
     display: block;
     width: 100%;
     height: clamp(96px, 15vw, 190px);
-    /* The tagline and robot hand sit on the banner's right edge; anchoring
-       there keeps the promise readable when the viewport crops the art. */
+    /* The lettering was removed from the artwork, so there is no longer a
+       phrase that has to survive cropping. Centring keeps the circuit-and-leaf
+       braid — the characteristic part — in frame on narrow viewports. */
     object-fit: cover;
-    object-position: right center;
+    object-position: center;
     border-bottom: 1px solid var(--edge-strong);
 }
 
