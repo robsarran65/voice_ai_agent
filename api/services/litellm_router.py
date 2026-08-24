@@ -13,9 +13,19 @@ import logging
 import os
 from dataclasses import dataclass, field
 
+import litellm
 from litellm import completion, get_llm_provider
 
 log = logging.getLogger(__name__)
+
+# Different providers/models accept different generation params — e.g.
+# claude-sonnet-5 direct via Anthropic rejects any temperature but 1, where
+# claude-haiku-4-5 accepts a range. Candy's persona sets one temperature for
+# every model uniformly (see CANDY_TEMPERATURE in api/core/persona.py), so
+# rather than hardcode per-model exceptions here, let litellm drop whatever a
+# given model doesn't support instead of erroring — the model's own default
+# stands in for the value that got dropped.
+litellm.drop_params = True
 
 # Which environment variable holds the key for a given litellm provider name.
 # A model string decides its own provider ("anthropic/..." vs
