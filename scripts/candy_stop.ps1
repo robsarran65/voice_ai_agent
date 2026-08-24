@@ -16,6 +16,83 @@ $ErrorActionPreference = 'SilentlyContinue'
 
 $Ports = @(8000, 8899)
 $Patterns = @('uvicorn\s+api\.index', 'http\.server\s+8899')
+$ConsoleTitles = @('Candy API', 'Candy UI')
+# Must match frontend/index.html's <title> exactly - that's what Chrome's
+# --app mode shows as the OS window title, since there's no tab strip to
+# show it elsewhere. Built from a Unicode escape rather than typed as a
+# literal em dash: a non-ASCII character embedded directly in a .ps1 file
+# depends on the file having (and being read with) a matching encoding, and
+# Windows PowerShell 5.1 parses a script without a BOM using the system
+# codepage, not UTF-8 - a literal em dash silently became "Candyâ€”" the
+# first time this ran, and the title match failed with no visible error.
+$BrowserTitlePrefix = "Candy $([char]0x2014)"
+
+# EnumWindows + PostMessage(WM_CLOSE) — done entirely in C#, not called from
+# a PowerShell scriptblock. Passing a scriptblock as the EnumWindowsProc
+# callback is unreliable in Windows PowerShell 5.1 (the delegate marshalling
+# doesn't invoke it the way it looks like it should), and it failed silently
+# here rather than throwing - the same trap the encoding bug above fell
+# into: no output tells you it isn't matching anything.
+#
+# WM_CLOSE, not taskkill /FI WINDOWTITLE: that terminates the whole PROCESS
+# owning the matched window - fine for "Candy API"/"Candy UI" (each cmd.exe
+# owns exactly one console and nothing else), but wrong for Chrome, where
+# one browser process can own several windows (Candy's app window plus any
+# other Chrome window you have open) and TerminateProcess would take all of
+# them down together. WM_CLOSE targets one window handle and asks only it
+# to close, leaving every other window that process owns untouched.
+#
+# -TypeDefinition, not -MemberDefinition: -MemberDefinition wraps the given
+# code as the BODY of a class it generates, so a `using` directive inside it
+# is a compile error (`using` must sit outside the class). That error was
+# also swallowed by $ErrorActionPreference above, so the type silently never
+# existed and every call below silently did nothing - the same "no visible
+# failure" trap twice in one script. Add -ErrorAction Stop plus a try/catch
+# here so a third such failure prints something instead of vanishing.
+if (-not ([System.Management.Automation.PSTypeName]'Candy.Win32').Type) {
+    $win32Source = @'
+using System;
+using System.Text;
+using System.Runtime.InteropServices;
+
+namespace Candy {
+    public static class Win32 {
+        [DllImport("user32.dll")] private static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+        [DllImport("user32.dll")] private static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int count);
+        [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr hWnd);
+        [DllImport("user32.dll")] private static extern bool PostMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+        private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+        private const uint WM_CLOSE = 0x0010;
+
+        public static int CloseByTitlePrefix(string prefix) {
+            int closed = 0;
+            EnumWindows((hWnd, lParam) => {
+                if (IsWindowVisible(hWnd)) {
+                    var sb = new StringBuilder(256);
+                    GetWindowText(hWnd, sb, 256);
+                    if (sb.ToString().StartsWith(prefix, StringComparison.Ordinal)) {
+                        PostMessage(hWnd, WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
+                        closed++;
+                    }
+                }
+                return true;
+            }, IntPtr.Zero);
+            return closed;
+        }
+    }
+}
+'@
+    try {
+        Add-Type -TypeDefinition $win32Source -ErrorAction Stop
+    } catch {
+        Write-Host "  [!] Window-closer helper failed to compile: $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+}
+
+function Close-WindowByTitlePrefix($prefix) {
+    if (-not ([System.Management.Automation.PSTypeName]'Candy.Win32').Type) { return 0 }
+    return [Candy.Win32]::CloseByTitlePrefix($prefix)
+}
 
 function Get-PythonProcesses {
     Get-CimInstance Win32_Process -Filter "Name='python.exe' OR Name='pythonw.exe'"
@@ -84,6 +161,27 @@ foreach ($port in $Ports) {
 }
 
 Start-Sleep -Milliseconds 800
+
+# 4. The "Candy API" / "Candy UI" console windows opened by `start "Title"
+#    cmd /k ...`. Their python child is already dead by this point, but /k
+#    leaves the empty cmd prompt sitting open - closing it here is what the
+#    user actually asked for: no leftover windows to puzzle over.
+#
+#    `start "Title" ...` sets that string as the console WINDOW title, not
+#    as a command-line argument, so it can't be found via CommandLine - the
+#    same window-based closer used for the browser window below finds it.
+foreach ($title in $ConsoleTitles) {
+    if ((Close-WindowByTitlePrefix $title) -eq 0) {
+        Write-Host "  console window '$title' already closed"
+    }
+}
+
+# 5. Candy's dedicated Chrome window, closed by title so any OTHER Chrome
+#    window or tab is left exactly as it was.
+$closedWindows = Close-WindowByTitlePrefix $BrowserTitlePrefix
+if ($closedWindows -eq 0) {
+    Write-Host "  no Chrome window titled '$BrowserTitlePrefix*' found (already closed, or it opened in a different browser)"
+}
 
 Write-Host ""
 $busy = @()
