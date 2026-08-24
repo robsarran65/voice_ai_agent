@@ -13,18 +13,45 @@ import logging
 import os
 from dataclasses import dataclass, field
 
-from litellm import completion
+from litellm import completion, get_llm_provider
 
 log = logging.getLogger(__name__)
 
+# Which environment variable holds the key for a given litellm provider name.
+# A model string decides its own provider ("anthropic/..." vs
+# "openrouter/..."), so the primary and fallback model can each authenticate
+# against a different service without either one hardcoding the other's key.
+_PROVIDER_ENV_VAR = {
+    "anthropic": "ANTHROPIC_API_KEY",
+    "openrouter": "OPENROUTER_API_KEY",
+}
 
-def _api_key() -> str | None:
+
+def _api_key_for(model: str) -> tuple[str | None, str | None]:
     """
-    Read the key per call rather than at import time. Import-time reads force
-    every importer to guarantee `load_dotenv()` already ran, which is what made
-    the app entrypoint need imports below its dotenv call.
+    Resolve the right key for a model's provider.
+
+    Read per call rather than at import time: an import-time read forces every
+    importer to guarantee `load_dotenv()` already ran, which is what made the
+    app entrypoint need its imports below the dotenv call.
+
+    Returns (key, error). error is set when the provider is known but its key
+    env var isn't — the caller can report that plainly instead of the request
+    failing deep inside the SDK with an auth error that doesn't name the cause.
     """
-    return os.getenv("OPENROUTER_API_KEY")
+    try:
+        _, provider, _, _ = get_llm_provider(model)
+    except Exception:
+        provider = None
+
+    env_var = _PROVIDER_ENV_VAR.get(provider)
+    if env_var is None:
+        return None, f"no known API key env var for provider {provider!r} (model {model!r})"
+
+    key = os.getenv(env_var)
+    if not key:
+        return None, f"{env_var} is not set"
+    return key, None
 
 
 @dataclass(frozen=True)
@@ -102,16 +129,21 @@ def complete_messages(
     conversation back each turn, which a system-prompt-plus-one-string call
     cannot express.
     """
-    api_key = _api_key()
-    if not api_key:
-        # Worth separating from a call failure: this one is a deploy problem,
-        # not a flaky provider, and no amount of retrying will fix it.
-        return LLMResult(ok=False, error="OPENROUTER_API_KEY is not set")
-
     attempts = [model] + ([fallback_model] if fallback_model else [])
     errors: list[str] = []
 
     for candidate in attempts:
+        # Resolved per candidate: the primary and fallback model can each
+        # belong to a different provider, so each needs its own key.
+        api_key, key_error = _api_key_for(candidate)
+        if key_error:
+            # Worth separating from a call failure: this one is a deploy
+            # problem, not a flaky provider, and retrying won't fix it — so
+            # skip straight to the next candidate instead of calling out.
+            log.warning("Skipping %s: %s", candidate, key_error)
+            errors.append(f"{candidate}: {key_error}")
+            continue
+
         try:
             text, calls, assistant = _attempt(
                 api_key=api_key,
