@@ -17,7 +17,7 @@ async def voice_chat(request: VoiceChatRequest):
     Receives text from Chrome STT, sends it to the agent system,
     and returns the agent's response for Chrome TTS.
     """
-    reply = coordinator.respond(request.text)
+    reply = coordinator.respond(request.text, session_id=request.session_id or "")
 
     # Deliberately 200 even when `reply.ok` is False. The browser speaks
     # whatever comes back, so a 5xx would make it read the response body —

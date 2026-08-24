@@ -262,6 +262,12 @@ const BACKEND_URL =
 // Everything Candy might say out loud has to survive being spoken, so the
 // failure branches return a plain sentence rather than a status code. The
 // technical detail goes to `meta` and the console, where it belongs.
+// One id per tab, so a calendar event Candy proposes on one turn can be
+// confirmed on the next. Not persisted: a reload should start clean rather
+// than inherit a half-finished confirmation.
+const SESSION_ID = (crypto.randomUUID && crypto.randomUUID()) ||
+    String(Date.now()) + Math.random().toString(16).slice(2);
+
 async function sendToBackend(text) {
     try {
         const response = await fetch(BACKEND_URL, {
@@ -269,7 +275,7 @@ async function sendToBackend(text) {
             headers: {
                 "Content-Type": "application/json"
             },
-            body: JSON.stringify({ text })
+            body: JSON.stringify({ text, session_id: SESSION_ID })
         });
 
         if (!response.ok) {

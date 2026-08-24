@@ -26,3 +26,6 @@ Thumbs.db
 
 # ...but brand assets are part of the product
 !frontend/assets/**
+
+# Google OAuth client secret and token — never commit
+api/.secrets/

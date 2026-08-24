@@ -3,3 +3,11 @@ uvicorn==0.35.0
 pydantic==2.11.7
 python-dotenv==1.1.1
 litellm==1.98.0
+
+# Weather lookups (wttr.in, Open-Meteo fallback)
+httpx==0.28.1
+
+# Google Calendar + Gmail
+google-api-python-client==2.198.0
+google-auth==2.49.2
+google-auth-oauthlib==1.4.0

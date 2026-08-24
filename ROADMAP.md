@@ -38,11 +38,21 @@ client product with email/calendar capabilities, modeled in part on `C:\Users\ro
      would all have been served HTML; and `"src": "/voice-chat"` could not match the
      `/voice-chat/` the frontend actually posts to. Both corrected in `vercel.json`, but
      nobody has deployed it yet — treat this item as open until someone does.
-4. **Email/calendar capabilities not started.** Client wants this eventually, modeled on
-   jarvis-2's `gcal.py`/`gmail.py`/`google_auth.py`. Jarvis 2 uses a **desktop, one-time-setup
-   OAuth flow** (run a script once, get a local `token.json`) — that does **not** map directly
-   onto a multi-tenant Vercel SaaS. Will need a proper web OAuth flow (per-client/tenant
-   consent + token storage) instead of porting jarvis-2's flow as-is.
+4. **Email/calendar capabilities — built for single-user, still not multi-tenant.**
+   Modelled on jarvis-2's `gcal.py`/`gmail.py`/`google_auth.py`, including its key lesson:
+   never force a scope list when *loading* a token, since a refresh token can only be
+   redeemed for the scopes it was granted with.
+   - Candy keeps its **own** `api/.secrets/token.json` — sharing jarvis-2's would mean
+     writing to that project on every refresh, and it's reference-only.
+   - Scopes are `calendar.events` + **`gmail.readonly`**. Jarvis 2 holds `gmail.modify`
+     because it sends and archives; Candy only reads. A token that cannot write is the
+     main limit on what a prompt-injected email can achieve.
+   - Calendar writes are staged in `api/core/pending.py` and require a spoken yes. The
+     yes/no decision is made in plain code, not by the model.
+   - **Still open for SaaS:** the desktop OAuth flow and the in-memory pending store are
+     both single-user. Multi-tenant needs a web consent flow with per-tenant token storage,
+     and `gmail.readonly` is a *restricted* scope requiring Google app verification before
+     anyone outside your own test users can grant it.
 5. ~~**`CoordinatorAgent` is a shared singleton.**~~ **Resolved.** It still is a
    module-level instance, but it no longer holds per-request state: `respond()` is
    stateless and `run_next_task()` now takes its `completed` set as an explicit
