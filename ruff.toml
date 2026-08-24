@@ -1,0 +1,3 @@
+# Archived scaffolding is kept for reference only and is not on any import
+# path — linting it would just produce noise about code we already retired.
+exclude = ["_archive"]
