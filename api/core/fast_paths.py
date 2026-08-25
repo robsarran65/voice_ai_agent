@@ -7,8 +7,8 @@ _THANKS = re.compile(r"^\s*(thanks|thank you|thanks candy|thank you candy)[!. ]*
 _TIME = re.compile(r"\b(what(?:'s| is) the time|what time is it|current time)\b", re.I)
 _DATE = re.compile(r"\b(what(?:'s| is) (?:today(?:'s)? date|the date)|what day is it|today(?:'s)? date)\b", re.I)
 _EXPLICIT_WEB_SEARCH = re.compile(
-    r"\b(search (?:google|the web|online)|google (?:search )?|look (?:it |this )?up(?: online)?|"
-    r"check (?:google|online|the web)|find (?:it |this )?online)\b",
+    r"\b(search(?: for)?|google|browse(?: the web)?|look (?:it |this )?up(?: online)?|"
+    r"check (?:on )?(?:google|online|the web)|find (?:it |this )?online)\b",
     re.I,
 )
 
