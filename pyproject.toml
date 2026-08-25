@@ -1,3 +1,33 @@
+[project]
+# Required by Vercel's build: it runs `uv lock` against this file the
+# moment pyproject.toml exists at all, and `uv` needs a real [project]
+# table to operate — a pyproject.toml carrying only [tool.vercel] (this
+# file's original, and only, purpose) fails with "No `project` table
+# found", which is what actually happened on the first deploy attempt.
+#
+# Dependencies are DUPLICATED from requirements.txt below, not read from
+# it — confirmed against Vercel's own docs and a reported regression
+# (vercel/vercel#14041): once pyproject.toml exists, Vercel's uv-based
+# installer uses it exclusively and does not fall back to requirements.txt
+# at all. requirements.txt stays as the source local dev actually installs
+# from (`pip install -r requirements.txt`, referenced in start_candy.bat's
+# own error message) — so if you add or version-bump a dependency, update
+# BOTH files or the two environments will quietly diverge.
+name = "candy-voice-ai-agent"
+version = "0.1.0"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi==0.116.1",
+    "uvicorn==0.35.0",
+    "pydantic==2.11.7",
+    "python-dotenv==1.1.1",
+    "litellm==1.98.0",
+    "httpx==0.28.1",
+    "google-api-python-client==2.198.0",
+    "google-auth==2.49.2",
+    "google-auth-oauthlib==1.4.0",
+]
+
 [tool.vercel]
 # Vercel's FastAPI auto-detection only looks for an `app` object at
 # app.py/index.py/server.py/main.py/wsgi.py/asgi.py under the project root,

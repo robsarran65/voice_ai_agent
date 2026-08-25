@@ -1,3 +1,8 @@
+# Local dev installs from THIS file (pip install -r requirements.txt).
+# Vercel's build ignores it entirely and uses pyproject.toml's
+# [project.dependencies] instead (its uv-based installer doesn't fall back
+# to requirements.txt once pyproject.toml exists at all). Keep both lists
+# in sync when adding or bumping a dependency.
 fastapi==0.116.1
 uvicorn==0.35.0
 pydantic==2.11.7
