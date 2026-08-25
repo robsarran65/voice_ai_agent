@@ -40,7 +40,11 @@ def search(query: str) -> WebSearchResult:
         "input": query,
         "tools": [{"type": "web_search"}],
         "include": ["web_search_call.action.sources"],
-        "max_output_tokens": 220,
+        # GPT-5 nano uses output tokens for reasoning before it writes the
+        # answer. A 220-token ceiling was exhausted by reasoning alone,
+        # producing an incomplete response with no message text.
+        "reasoning": {"effort": os.getenv("WEB_SEARCH_REASONING_EFFORT", "low")},
+        "max_output_tokens": int(os.getenv("WEB_SEARCH_MAX_OUTPUT_TOKENS", "700")),
         "store": False,
     }
     try:
@@ -89,7 +93,14 @@ def search(query: str) -> WebSearchResult:
     token_cost = input_tokens * 0.05 / 1_000_000 + output_tokens * 0.40 / 1_000_000
     answer = " ".join(answer_parts).strip()
     if not answer:
-        return WebSearchResult(ok=False, error="web search returned no text")
+        details = data.get("incomplete_details") or {}
+        reason = details.get("reason")
+        status = data.get("status") or "unknown"
+        suffix = f": {reason}" if reason else ""
+        return WebSearchResult(
+            ok=False,
+            error=f"web search returned no text (status={status}{suffix})",
+        )
     return WebSearchResult(
         ok=True,
         answer=answer,
