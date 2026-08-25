@@ -49,8 +49,16 @@ def dated_persona(today: str, timezone: str) -> str:
 # having an outage — do nothing to OpenRouter, since it's a different
 # account and a different path to the model entirely. A same-provider
 # fallback would share fate with whatever just failed.
+#
+# DeepSeek v3, not Sonnet: confirmed (OpenRouter's /models endpoint,
+# supported_parameters) to support tool calls, which the fallback needs —
+# it runs inside the same weather/calendar/email tool loop as the primary.
+# ~10x cheaper than Sonnet per token, so the same OpenRouter balance covers
+# far more fallback calls before running out again. No free-tier DeepSeek
+# model exists on OpenRouter as of this writing (checked live) — every
+# variant carries real, if small, per-token pricing.
 CANDY_MODEL = "anthropic/claude-haiku-4-5-20251001"
-CANDY_FALLBACK_MODEL = "openrouter/anthropic/claude-sonnet-5"
+CANDY_FALLBACK_MODEL = "openrouter/deepseek/deepseek-chat-v3-0324"
 
 # Spoken replies get cut off if they run long, and long answers feel wrong
 # out loud regardless.
