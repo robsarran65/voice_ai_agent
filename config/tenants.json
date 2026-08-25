@@ -1,0 +1,40 @@
+{
+  "defaults": {
+    "assistant_name": "Candy",
+    "company_name": "MunAI Solutions",
+    "model": "openai/gpt-5-nano",
+    "fallback_model": "openrouter/deepseek/deepseek-chat-v3-0324",
+    "max_tokens": 220,
+    "temperature": 0.3,
+    "recent_history_messages": 6,
+    "history_summary_chars": 700,
+    "monthly_llm_budget_usd": 25.0,
+    "capabilities": {
+      "weather": true,
+      "calendar": true,
+      "email": true
+    },
+    "trusted_callers": []
+  },
+  "tenants": {
+    "munai-demo": {
+      "assistant_name": "Candy",
+      "company_name": "MunAI Solutions",
+      "monthly_llm_budget_usd": 10.0,
+      "trusted_callers": [],
+      "vapi_assistant_ids": []
+    },
+    "sample-client": {
+      "assistant_name": "Ava",
+      "company_name": "Sample Client",
+      "monthly_llm_budget_usd": 25.0,
+      "capabilities": {
+        "weather": true,
+        "calendar": false,
+        "email": false
+      },
+      "trusted_callers": [],
+      "vapi_assistant_ids": []
+    }
+  }
+}

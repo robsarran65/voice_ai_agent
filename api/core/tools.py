@@ -9,7 +9,7 @@ import json
 import logging
 
 from api.core import pending
-from api.services import google_calendar, google_gmail, weather
+from api.services import google_calendar, google_gmail, weather, web_search
 
 log = logging.getLogger(__name__)
 
@@ -44,6 +44,26 @@ WEATHER_TOOL = {
                 },
             },
             "required": ["city"],
+        },
+    },
+}
+
+
+WEB_SEARCH_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "search_web",
+        "description": (
+            "Search the live web for current or external information. Use for news, "
+            "current facts, recent events, companies, products, people, or whenever "
+            "the answer may have changed since the model knowledge cutoff."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "A concise web search query."}
+            },
+            "required": ["query"],
         },
     },
 }
@@ -162,7 +182,7 @@ _SENSITIVE_TOOLS = {
 }
 
 
-def available_tools(trusted: bool = True) -> list:
+def available_tools(trusted: bool = True, capabilities: dict | None = None) -> list:
     """
     The tools Candy can currently use.
 
@@ -175,11 +195,14 @@ def available_tools(trusted: bool = True) -> list:
     who's at the keyboard) is unaffected. It exists for the phone adapter,
     which sets it to False for any caller not on the allowlist.
     """
-    tools = [WEATHER_TOOL]
+    capabilities = capabilities or {"weather": True, "web_search": True, "calendar": True, "email": True}
+    tools = [WEATHER_TOOL] if capabilities.get("weather", True) else []
+    if capabilities.get("web_search", True) and web_search.is_ready():
+        tools += [WEB_SEARCH_TOOL]
     if trusted:
-        if google_calendar.is_ready():
+        if capabilities.get("calendar", True) and google_calendar.is_ready():
             tools += [CALENDAR_READ_TOOL, CALENDAR_WRITE_TOOL]
-        if google_gmail.is_ready():
+        if capabilities.get("email", True) and google_gmail.is_ready():
             tools += [MAIL_LIST_TOOL, MAIL_READ_TOOL]
     return tools
 
@@ -200,6 +223,20 @@ def _run_weather(args: dict, session_id: str) -> dict:
         "tomorrow": result.tomorrow,
     }
 
+
+
+def _run_web_search(args: dict, session_id: str) -> dict:
+    result = web_search.search(args.get("query", ""))
+    if not result.ok:
+        return {"ok": False, "reason": "I couldn't search the web just then."}
+    return {
+        "ok": True,
+        "answer": result.answer,
+        "sources": result.sources,
+        "input_tokens": result.input_tokens,
+        "output_tokens": result.output_tokens,
+        "estimated_cost_usd": result.estimated_cost_usd,
+    }
 
 def _run_list_events(args: dict, session_id: str) -> dict:
     result = google_calendar.list_events(
@@ -279,6 +316,7 @@ UNTRUSTED_MAIL_NOTE = (
 
 _HANDLERS = {
     "get_weather": _run_weather,
+    "search_web": _run_web_search,
     "list_calendar_events": _run_list_events,
     "propose_calendar_event": _run_propose_event,
     "list_email": _run_list_email,

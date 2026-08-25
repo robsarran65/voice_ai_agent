@@ -1,35 +1,42 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Header, HTTPException
 
 from api.core.coordinator_agent import CoordinatorAgent
+from api.core.tenant_config import get_tenant
 from api.models.request_models import VoiceChatRequest
 from api.models.response_models import VoiceChatResponse
 
 router = APIRouter()
-
-# Safe to share: CoordinatorAgent.respond keeps no per-request state.
 coordinator = CoordinatorAgent()
 
 
 @router.post("/", response_model=VoiceChatResponse)
-async def voice_chat(request: VoiceChatRequest):
-    """
-    Main voice-chat endpoint.
-    Receives text from Chrome STT, sends it to the agent system,
-    and returns the agent's response for Chrome TTS.
-    """
-    reply = coordinator.respond(request.text, session_id=request.session_id or "")
+async def voice_chat(request: VoiceChatRequest, x_munai_tenant: str | None = Header(default=None)):
+    """Multi-tenant web voice endpoint with per-turn cost telemetry."""
+    tenant_id = x_munai_tenant or request.tenant_id
+    try:
+        settings = get_tenant(tenant_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    # Deliberately 200 even when `reply.ok` is False. The browser speaks
-    # whatever comes back, so a 5xx would make it read the response body —
-    # status code and JSON braces included — aloud. The friendly line in
-    # `reply.message` is the better thing to hear; `ok` carries the real
-    # outcome for any caller that cares.
+    reply = coordinator.respond(
+        request.text,
+        session_id=request.session_id or "",
+        settings=settings,
+    )
     return VoiceChatResponse(
         ok=reply.ok,
         user_text=request.text,
         agent_task_id=None,
         agent_task_title=None,
-        agent_name="Coordinator",
+        agent_name=settings.assistant_name,
         agent_message=reply.message,
         model=reply.model,
+        input_tokens=reply.input_tokens,
+        output_tokens=reply.output_tokens,
+        cached_input_tokens=reply.cached_input_tokens,
+        cost_usd=reply.cost_usd,
+        latency_ms=reply.latency_ms,
+        fallback_used=reply.fallback_used,
+        llm_calls=reply.llm_calls,
+        cost_path=reply.cost_path,
     )

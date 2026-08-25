@@ -26,6 +26,8 @@ import time
 from fastapi import APIRouter, HTTPException, Request
 
 from api.core.coordinator_agent import CoordinatorAgent
+from api.core.history import compact_phone_history
+from api.core.tenant_config import get_tenant, tenant_for_vapi_assistant
 from api.models.request_models import VapiChatRequest
 
 log = logging.getLogger(__name__)
@@ -74,25 +76,16 @@ def _extract_caller_number(call: dict) -> str | None:
     return None
 
 
-def _is_trusted_caller(call: dict) -> bool:
-    """
-    Whether this caller should get calendar/email access.
-
-    An empty allowlist means untrusted-by-default — the same "off until
-    explicitly configured" posture as the auth check above, and as the
-    Google tools elsewhere in this app, which stay hidden until a token file
-    exists rather than erroring at call time.
-    """
-    allowed = {
-        n.strip() for n in os.getenv("CANDY_ALLOWED_CALLERS", "").split(",") if n.strip()
-    }
+def _is_trusted_caller(call: dict, settings) -> bool:
+    """Tenant-scoped phone allowlist for private calendar/email tools."""
+    allowed = set(settings.trusted_callers)
     if not allowed:
         return False
     caller = _extract_caller_number(call)
     return caller is not None and caller in allowed
 
 
-def _openai_shaped(text: str, model: str | None) -> dict:
+def _openai_shaped(text: str, model: str | None, *, input_tokens: int = 0, output_tokens: int = 0) -> dict:
     """Minimum valid OpenAI chat-completion object — what Vapi expects back."""
     now = int(time.time())
     return {
@@ -107,6 +100,11 @@ def _openai_shaped(text: str, model: str | None) -> dict:
                 "finish_reason": "stop",
             }
         ],
+        "usage": {
+            "prompt_tokens": input_tokens,
+            "completion_tokens": output_tokens,
+            "total_tokens": input_tokens + output_tokens,
+        },
     }
 
 
@@ -130,7 +128,16 @@ async def phone_chat_completions(request: Request):
     messages = vapi_request.messages
     call = vapi_request.call
     session_id = call.get("id") or ""
-    trusted = _is_trusted_caller(call)
+    requested_tenant = request.headers.get("x-munai-tenant")
+    try:
+        if requested_tenant:
+            settings = get_tenant(requested_tenant)
+        else:
+            assistant = call.get("assistant") or {}
+            settings = tenant_for_vapi_assistant(assistant.get("id"))
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    trusted = _is_trusted_caller(call, settings)
 
     # Vapi resends the whole transcript every turn, newest message last.
     # Everything before it is prior conversation; a stray system message
@@ -138,13 +145,32 @@ async def phone_chat_completions(request: Request):
     # coordinator supplies its own persona as the system prompt.
     if messages and messages[-1].get("role") == "user":
         user_text = messages[-1].get("content", "")
-        history = [m for m in messages[:-1] if m.get("role") in ("user", "assistant")]
+        raw_history = [m for m in messages[:-1] if m.get("role") in ("user", "assistant")]
+        history, history_summary = compact_phone_history(
+            raw_history, recent_messages=settings.recent_history_messages,
+            summary_chars=settings.history_summary_chars,
+        )
     else:
         # No fresh user turn to answer yet — e.g. Vapi's own setup/handshake
         # calls. Nothing to say.
         user_text = ""
-        history = [m for m in messages if m.get("role") in ("user", "assistant")]
+        raw_history = [m for m in messages if m.get("role") in ("user", "assistant")]
+        history, history_summary = compact_phone_history(
+            raw_history, recent_messages=settings.recent_history_messages,
+            summary_chars=settings.history_summary_chars,
+        )
 
-    reply = coordinator.respond(user_text, session_id=session_id, history=history, trusted=trusted)
+    reply = coordinator.respond(
+        user_text, session_id=session_id, history=history, trusted=trusted,
+        history_summary=history_summary, settings=settings,
+    )
 
-    return _openai_shaped(reply.message, reply.model)
+    log.info(
+        "phone_turn_cost session=%s model=%s llm_calls=%d input_tokens=%d output_tokens=%d cost_usd=%.8f latency_ms=%d path=%s",
+        session_id, reply.model, reply.llm_calls, reply.input_tokens,
+        reply.output_tokens, reply.cost_usd, reply.latency_ms, reply.cost_path,
+    )
+    return _openai_shaped(
+        reply.message, reply.model, input_tokens=reply.input_tokens,
+        output_tokens=reply.output_tokens,
+    )

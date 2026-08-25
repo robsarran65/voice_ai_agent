@@ -1,466 +1,509 @@
-# 🎙️ Voice AI Agent — SaaS Platform
+# MunAI Voice AI Agent
 
-> A production-ready, multi-agent Voice AI SaaS built with FastAPI, LangGraph, LiteLLM, and a Chrome-native STT/TTS frontend. Orchestrate specialist AI agents over a real-time voice interface, backed by Redis, PostgreSQL, and a retrieval pipeline — deployable to Vercel in minutes.
+MunAI Voice AI Agent is a low-cost, configurable voice assistant platform for browser and phone experiences. The current implementation is designed to stay lightweight for demos and pilots while providing a clean path to a multi-tenant SaaS deployment.
 
----
+The application uses FastAPI, LiteLLM, OpenAI GPT-5 nano as the default low-cost model, Chrome Web Speech APIs for browser speech, and Vapi for phone integration. Tenant behavior is configured through JSON rather than hard-coded customer-specific logic.
 
-## Table of Contents
-
-- [Architecture Overview](#architecture-overview)
-- [Tech Stack](#tech-stack)
-- [Folder Structure](#folder-structure)
-- [Prerequisites](#prerequisites)
-- [Environment Variables](#environment-variables)
-- [Local Setup](#local-setup)
-- [Local Testing](#local-testing)
-- [API Reference](#api-reference)
-- [Deployment to Vercel](#deployment-to-vercel)
-- [Contributing](#contributing)
-- [License](#license)
+> **Current status:** Production-oriented multi-tenant scaffold. The core voice, tenant configuration, cost controls, phone routing, Google integrations, and model telemetry are implemented. Shared persistent state and tenant-scoped OAuth storage are recommended before regulated or high-scale production use.
 
 ---
 
-## Architecture Overview
+## What changed in the cost-optimized implementation
 
-```
-┌──────────────────────────────────────────────────────────────────┐
-│                        Browser (Frontend)                        │
-│         Chrome Web Speech API — STT / TTS                        │
-│         Sends text to /api/voice-chat · Speaks response back     │
-└───────────────────────────┬──────────────────────────────────────┘
-                            │ HTTPS / JSON
-┌───────────────────────────▼──────────────────────────────────────┐
-│                    FastAPI Backend (Python)                       │
-│  ┌──────────────┐   ┌──────────────────────────────────────────┐ │
-│  │ /health      │   │ /api/voice-chat                          │ │
-│  │ (liveness)   │   │  → CoordinatorAgent                      │ │
-│  └──────────────┘   │      → DAG / LangGraph Workflow           │ │
-│                     │          → Specialist Agents              │ │
-│                     │      → LiteLLM Router (model dispatch)    │ │
-│                     │      → Retrieval Pipeline (RAG)           │ │
-│                     └──────────────────────────────────────────┘ │
-│  ┌──────────────────────┐   ┌─────────────────────────────────┐  │
-│  │ Redis Client         │   │ PostgreSQL Client                │  │
-│  │ (session / cache)    │   │ (users, history, embeddings)     │  │
-│  └──────────────────────┘   └─────────────────────────────────┘  │
-└──────────────────────────────────────────────────────────────────┘
-```
+The current version includes the Sprint 1 P0 and P1 cost improvements:
 
-### Agent Orchestration
-
-```
-CoordinatorAgent
-    │
-    ├── LangGraph DAG
-    │       ├── Node: Intent Classification
-    │       ├── Node: Context Retrieval  (Retrieval Pipeline → Postgres pgvector)
-    │       ├── Node: Specialist Dispatch
-    │       │       ├── Specialist Agent A  (e.g., FAQ / Knowledge)
-    │       │       ├── Specialist Agent B  (e.g., Task / Action)
-    │       │       └── Specialist Agent N  (extensible)
-    │       └── Node: Response Synthesis
-    │
-    └── LiteLLM Router
-            ├── Primary model   (e.g., GPT-4o)
-            └── Fallback model  (e.g., Claude 3.5 Sonnet)
-```
-
-**Key design decisions:**
-- **CoordinatorAgent** is the single entry-point for all voice turns; it owns session state and routes work through the DAG.
-- **LangGraph** defines the agent DAG as code — nodes are pure Python functions, edges encode conditional branching.
-- **LiteLLM** provides a unified interface across OpenAI, Anthropic, Cohere, and others — swap models without touching agent logic.
-- **Redis** stores ephemeral session context (conversation window, user prefs) for sub-millisecond reads.
-- **PostgreSQL + pgvector** persists conversation history and document embeddings for the retrieval pipeline.
-- **Chrome STT/TTS** keeps audio processing client-side — no audio bytes leave the browser, reducing latency and cost.
+- **GPT-5 nano is the default LLM** for a fast, low-cost primary path.
+- **Per-call telemetry** records model, input tokens, output tokens, cached input tokens, estimated cost, latency, and fallback use.
+- **Deterministic fast paths** answer simple greetings, date/time requests, acknowledgements, and similar requests without an LLM call when appropriate.
+- **Bounded phone conversation history** prevents Vapi calls from repeatedly sending an ever-growing transcript to the model.
+- **Deterministic history compaction** avoids paying a second model simply to summarize old conversation history.
+- **Weather responses can bypass the second LLM call** after the tool returns a predictable result.
+- **OpenAI prompt caching support** uses a stable tenant-specific cache key and records cached-token usage.
+- **Per-tenant output token limits** provide a simple cost-control guardrail.
+- **Tenant capability switches** can enable or disable weather, calendar, and email functionality.
+- **Tenant-specific trusted caller allowlists** support safer phone routing.
+- **Vapi assistant IDs can map directly to tenants.**
 
 ---
 
-## Tech Stack
+## Architecture
 
-| Layer | Technology |
+```text
+                         Browser Voice
+                  Chrome Web Speech API
+                    STT + TTS in browser
+                           |
+                           v
++----------------------------------------------------------+
+|                     FastAPI Backend                      |
+|                                                          |
+|  /voice-chat/                    /phone/                  |
+|       |                              |                    |
+|       +------------+-----------------+                    |
+|                    v                                      |
+|              Tenant Resolution                            |
+|        header / request / Vapi assistant ID               |
+|                    |                                      |
+|                    v                                      |
+|             Coordinator Agent                             |
+|          / Fast deterministic paths                       |
+|                    |                                      |
+|          +---------+----------+                           |
+|          |                    |                           |
+|          v                    v                           |
+|     Tool execution       LiteLLM Router                   |
+|  Weather/Calendar/Gmail   GPT-5 nano primary              |
+|                           configured fallback             |
+|                                  |                        |
+|                                  v                        |
+|                     Token / Cost / Latency telemetry      |
++----------------------------------------------------------+
+                           ^
+                           |
+                     Vapi Phone Channel
+```
+
+### Important design choice
+
+Redis, PostgreSQL, pgvector, LangGraph workflows, and retrieval code are **not required by the current runtime**. Historical or experimental implementations are kept under `_archive/` where applicable. They should only be reintroduced when a real product requirement justifies the extra infrastructure and operating cost.
+
+---
+
+## Technology stack
+
+| Layer | Current implementation |
 |---|---|
-| Backend framework | FastAPI + Uvicorn |
-| Agent orchestration | LangGraph (DAG), custom CoordinatorAgent |
+| API | FastAPI |
+| Application server | Uvicorn |
 | LLM routing | LiteLLM |
-| Cache / session | Redis |
-| Database | PostgreSQL + pgvector |
-| Retrieval (RAG) | Custom retrieval pipeline (chunking → embed → pgvector search) |
-| Frontend | Vanilla JS + Chrome Web Speech API (STT / TTS) |
-| Deployment | Vercel (Serverless Functions / Edge) |
+| Default LLM | OpenAI GPT-5 nano |
+| Browser STT/TTS | Chrome Web Speech API |
+| Phone voice | Vapi |
+| Weather | Existing weather service integration |
+| Calendar | Google Calendar integration |
+| Email | Gmail integration |
+| Tenant configuration | `config/tenants.json` |
+| Runtime telemetry | Token, cached-token, cost, latency, model and fallback logging |
 | Language | Python 3.11+ |
 
 ---
 
-## Folder Structure
+## Repository structure
 
-```
+```text
 voice_ai_agent/
-│
-├── api/                          # FastAPI application
-│   ├── main.py                   # App factory, mounts routers, CORS, lifespan
+├── api/
+│   ├── core/
+│   │   ├── coordinator_agent.py   # Main assistant orchestration
+│   │   ├── fast_paths.py          # Zero-LLM deterministic responses
+│   │   ├── history.py             # Bounded/compacted phone history
+│   │   ├── pending.py             # Pending confirmations/session actions
+│   │   ├── persona.py             # Tenant-aware assistant persona
+│   │   ├── tenant_config.py       # Tenant configuration loader
+│   │   └── tools.py               # Tool schemas and execution
+│   ├── models/
+│   │   ├── request_models.py
+│   │   └── response_models.py
 │   ├── routes/
-│   │   ├── voice_chat.py         # POST /api/voice-chat  — main voice turn
-│   │   └── health.py             # GET  /health          — liveness probe
-│   ├── agents/
-│   │   ├── coordinator.py        # CoordinatorAgent — session mgmt, DAG entry
-│   │   ├── specialists/
-│   │   │   ├── base.py           # BaseSpecialistAgent ABC
-│   │   │   ├── knowledge.py      # FAQ / knowledge-base specialist
-│   │   │   └── task.py           # Action / task-execution specialist
-│   │   └── dag/
-│   │       ├── graph.py          # LangGraph StateGraph definition
-│   │       └── nodes.py          # Individual DAG node functions
-│   ├── llm/
-│   │   └── router.py             # LiteLLM router config (models, fallbacks)
-│   ├── retrieval/
-│   │   ├── pipeline.py           # Chunking → embedding → pgvector search
-│   │   └── embedder.py           # Embedding model wrapper
-│   ├── db/
-│   │   ├── postgres.py           # AsyncPG / SQLAlchemy client + pool
-│   │   └── redis.py              # Redis async client + session helpers
-│   └── schemas/
-│       └── voice.py              # Pydantic models (VoiceChatRequest/Response)
-│
+│   │   ├── health.py
+│   │   ├── phone.py               # Vapi phone webhook path
+│   │   └── voice_chat.py          # Browser/API voice chat path
+│   ├── services/
+│   │   ├── google_auth.py
+│   │   ├── google_calendar.py
+│   │   ├── google_gmail.py
+│   │   ├── litellm_router.py      # Model routing + usage/cost telemetry
+│   │   └── weather.py
+│   └── index.py                   # FastAPI application entry point
+├── config/
+│   └── tenants.json               # Multi-tenant configuration
 ├── frontend/
-│   ├── index.html                # Single-page app shell
-│   ├── app.js                    # Chrome STT + TTS + fetch to /api/voice-chat
-│   └── style.css                 # Minimal UI styles
-│
+│   ├── index.html
+│   ├── app.js
+│   ├── style.css
+│   └── assets/
 ├── scripts/
-│   ├── seed_db.py                # Seed Postgres schema + sample embeddings
-│   └── ingest.py                 # Ingest documents into retrieval pipeline
-│
-├── tests/
-│   ├── test_voice_chat.py        # Route integration tests (pytest + httpx)
-│   ├── test_coordinator.py       # CoordinatorAgent unit tests
-│   ├── test_dag.py               # LangGraph DAG node tests
-│   └── conftest.py               # Fixtures (test app, mock Redis/Postgres)
-│
-├── vercel.json                   # Vercel routing + serverless function config
-├── requirements.txt              # Python dependencies
-├── .env.example                  # Environment variable template
-├── Makefile                      # Dev shortcuts
+│   └── google_setup.py
+├── _archive/                      # Experimental/future architecture code
+├── requirements.txt
+├── pyproject.toml
+├── start_candy.bat
+├── stop_candy.bat
+├── ROADMAP.md
 └── README.md
 ```
 
 ---
 
-## Prerequisites
+## Tenant configuration
 
-| Requirement | Version | Notes |
-|---|---|---|
-| Python | 3.11+ | Use `pyenv` or system install |
-| Node.js | 18+ | For Vercel CLI only |
-| Redis | 7+ | Local install or Redis Cloud free tier |
-| PostgreSQL | 15+ with pgvector | `CREATE EXTENSION vector;` required |
-| Vercel CLI | latest | `npm i -g vercel` |
-| Chrome browser | any recent | Required for Web Speech API (STT/TTS) |
+Tenant behavior is managed in:
+
+```text
+config/tenants.json
+```
+
+Each tenant can configure items such as:
+
+- tenant ID
+- assistant name
+- company name
+- primary model
+- fallback model
+- maximum output tokens
+- model temperature
+- phone history window
+- phone history compaction size
+- monthly LLM budget target
+- enabled capabilities
+- trusted caller numbers
+- Vapi assistant IDs
+
+Example structure:
+
+```json
+{
+  "default_tenant": "munai-demo",
+  "tenants": {
+    "munai-demo": {
+      "assistant_name": "Candy",
+      "company_name": "MunAI Solutions",
+      "primary_model": "openai/gpt-5-nano",
+      "fallback_model": "deepseek/deepseek-chat",
+      "max_output_tokens": 220,
+      "temperature": 0.3,
+      "capabilities": {
+        "weather": true,
+        "calendar": true,
+        "email": true
+      }
+    }
+  }
+}
+```
+
+Use the actual fields in the included `config/tenants.json` as the authoritative configuration schema.
+
+### Selecting a tenant
+
+For browser/API traffic, send the tenant header:
+
+```text
+X-MunAI-Tenant: munai-demo
+```
+
+The `/voice-chat/` request can also include a `tenant_id`.
+
+For Vapi phone traffic, the phone route can resolve a tenant using either:
+
+- `X-MunAI-Tenant`, or
+- a Vapi assistant ID mapped in `config/tenants.json`.
+
+### Configuration environment variables
+
+```text
+MUNAI_TENANT_CONFIG   Optional path to a different tenant JSON file
+MUNAI_DEFAULT_TENANT  Optional default tenant override
+```
+
+The tenant loader detects configuration-file changes so common tenant settings can be updated without changing application logic.
 
 ---
 
-## Environment Variables
+## Environment variables
 
-Copy `.env.example` to `.env` and fill in all values before running.
+Create a `.env` file in the project root. Do **not** commit `.env` or API secrets to GitHub.
 
-```bash
-cp .env.example .env
+Common variables include:
+
+```text
+OPENAI_API_KEY=...
+DEEPSEEK_API_KEY=...
+OPENROUTER_API_KEY=...
+
+# Google integrations, when enabled
+GOOGLE_CLIENT_ID=...
+GOOGLE_CLIENT_SECRET=...
+
+# Optional tenant configuration overrides
+MUNAI_TENANT_CONFIG=config/tenants.json
+MUNAI_DEFAULT_TENANT=munai-demo
 ```
 
-| Variable | Description | Example |
-|---|---|---|
-| `OPENAI_API_KEY` | OpenAI API key for LiteLLM primary model | `sk-...` |
-| `ANTHROPIC_API_KEY` | Anthropic key for fallback model | `sk-ant-...` |
-| `LITELLM_MODEL_PRIMARY` | Primary LLM model name | `gpt-4o` |
-| `LITELLM_MODEL_FALLBACK` | Fallback LLM model name | `claude-3-5-sonnet-20241022` |
-| `REDIS_URL` | Redis connection string | `redis://localhost:6379` |
-| `DATABASE_URL` | Postgres async connection string | `postgresql+asyncpg://user:pass@localhost:5432/voiceai` |
-| `EMBEDDING_MODEL` | Embedding model for retrieval | `text-embedding-3-small` |
-| `CORS_ORIGINS` | Allowed CORS origins (comma-separated) | `http://localhost:3000,https://yourdomain.vercel.app` |
-| `SECRET_KEY` | App secret for signing tokens | random 32-char string |
-| `LOG_LEVEL` | Logging verbosity | `INFO` |
+Only configure provider keys that are required by the models and integrations you enable.
 
 ---
 
-## Local Setup
+## Local setup on Windows 11
 
-### 1 — Clone the repository
+From PowerShell:
 
-```bash
-git clone https://github.com/your-org/voice_ai_agent.git
-cd voice_ai_agent
-```
+```powershell
+cd C:\Users\rober\voice_ai_agent
 
-### 2 — Create and activate a virtual environment
-
-```bash
 python -m venv .venv
-# macOS / Linux
-source .venv/bin/activate
-# Windows (PowerShell)
-.venv\Scripts\Activate.ps1
-```
+.\.venv\Scripts\Activate.ps1
 
-### 3 — Install Python dependencies
-
-```bash
 pip install -r requirements.txt
 ```
 
-### 4 — Start Redis (local)
+Add your local `.env` values, then run the application using the existing launcher:
 
-```bash
-# macOS (Homebrew)
-brew services start redis
-
-# Windows (WSL or Docker)
-docker run -d -p 6379:6379 redis:7-alpine
-
-# Verify
-redis-cli ping   # → PONG
+```powershell
+.\start_candy.bat
 ```
 
-### 5 — Start PostgreSQL and enable pgvector
+To stop it:
 
-```bash
-# macOS (Homebrew)
-brew services start postgresql@15
-
-# Connect and create database
-psql postgres -c "CREATE DATABASE voiceai;"
-psql voiceai  -c "CREATE EXTENSION IF NOT EXISTS vector;"
+```powershell
+.\stop_candy.bat
 ```
 
-### 6 — Configure environment variables
+You can also run FastAPI directly if needed:
 
-```bash
-cp .env.example .env
-# Edit .env with your API keys and connection strings
-```
-
-### 7 — Seed the database
-
-```bash
-python scripts/seed_db.py
-```
-
-### 8 — (Optional) Ingest documents into the retrieval pipeline
-
-```bash
-python scripts/ingest.py --source ./docs/
-```
-
-### 9 — Start the FastAPI server
-
-```bash
-uvicorn api.main:app --reload --host 0.0.0.0 --port 8000
-```
-
-The API is now live at `http://localhost:8000`.  
-Open `frontend/index.html` in **Chrome** to start a voice session.
-
-> **Tip:** Use the `Makefile` shortcut: `make dev`
-
----
-
-## Local Testing
-
-### Run the full test suite
-
-```bash
-pytest tests/ -v
-```
-
-### Run with coverage
-
-```bash
-pytest tests/ --cov=api --cov-report=term-missing
-```
-
-### Test individual layers
-
-```bash
-# Route integration tests only
-pytest tests/test_voice_chat.py -v
-
-# Agent unit tests
-pytest tests/test_coordinator.py tests/test_dag.py -v
-```
-
-### Manual API test (curl)
-
-```bash
-curl -X POST http://localhost:8000/api/voice-chat \
-  -H "Content-Type: application/json" \
-  -d '{"session_id": "test-123", "text": "Hello, what can you help me with?"}'
-```
-
-**Expected response:**
-```json
-{
-  "session_id": "test-123",
-  "response": "Hi! I can help you with ...",
-  "agent": "knowledge",
-  "latency_ms": 412
-}
-```
-
-### Health check
-
-```bash
-curl http://localhost:8000/health
-# → {"status": "ok", "redis": "ok", "postgres": "ok"}
-```
-
-### Swagger UI
-
-Interactive API docs available at:
-```
-http://localhost:8000/docs
+```powershell
+uvicorn api.index:app --reload
 ```
 
 ---
 
-## API Reference
+## Browser voice
 
-### `POST /api/voice-chat`
+The browser experience intentionally uses the Chrome Web Speech API for speech-to-text and text-to-speech. This keeps browser speech processing off the paid backend provider path and reduces both latency and operating cost.
 
-Send a transcribed voice turn and receive an AI-generated response.
-
-**Request body:**
-```json
-{
-  "session_id": "string",   // UUID; create once per browser session
-  "text": "string"          // STT transcript from Chrome Web Speech API
-}
-```
-
-**Response:**
-```json
-{
-  "session_id": "string",
-  "response": "string",     // Text to pass to Chrome TTS
-  "agent": "string",        // Which specialist handled the turn
-  "latency_ms": 0           // End-to-end server latency
-}
-```
-
-| Status | Meaning |
-|---|---|
-| `200` | Successful agent response |
-| `422` | Validation error (missing fields) |
-| `500` | Internal server / LLM error |
+The browser sends text requests to the backend and speaks the returned text locally.
 
 ---
 
-### `GET /health`
+## Phone voice with Vapi
 
-Liveness probe for Vercel and uptime monitors.
+Vapi handles the phone voice channel and forwards conversation messages to the MunAI phone endpoint.
 
-**Response:**
-```json
-{
-  "status": "ok",
-  "redis": "ok",
-  "postgres": "ok"
-}
-```
+The cost-optimized phone implementation limits the amount of historical conversation forwarded into each LLM request. Older context is compacted deterministically, while a configurable recent conversation window is retained verbatim.
+
+This is important because forwarding a complete transcript on every turn causes input-token usage to increase as a call gets longer.
 
 ---
 
-## Deployment to Vercel
+## LLM cost controls
 
-### 1 — Install Vercel CLI
+### Default model
 
-```bash
-npm install -g vercel
+The default low-cost model is configured as:
+
+```text
+openai/gpt-5-nano
 ```
 
-### 2 — Login to Vercel
+Model selection remains tenant configurable through `config/tenants.json`.
 
-```bash
-vercel login
-```
+### Deterministic fast paths
 
-### 3 — Review `vercel.json`
+Simple requests that do not require model reasoning can be answered directly by application code. This reduces both cost and latency.
 
-The included `vercel.json` maps all backend routes to the FastAPI serverless function and serves the frontend statically:
+### Bounded history
 
-```json
-{
-  "version": 2,
-  "builds": [
-    { "src": "api/main.py", "use": "@vercel/python" },
-    { "src": "frontend/**", "use": "@vercel/static" }
-  ],
-  "routes": [
-    { "src": "/api/(.*)", "dest": "api/main.py" },
-    { "src": "/health",   "dest": "api/main.py" },
-    { "src": "/(.*)",     "dest": "frontend/$1"  }
-  ]
-}
-```
+Phone conversations keep a controlled recent-history window rather than continually forwarding an unlimited transcript.
 
-### 4 — Set production environment variables
+### Tool-response optimization
 
-```bash
-vercel env add OPENAI_API_KEY
-vercel env add ANTHROPIC_API_KEY
-vercel env add REDIS_URL
-vercel env add DATABASE_URL
-vercel env add EMBEDDING_MODEL
-vercel env add CORS_ORIGINS
-vercel env add SECRET_KEY
-vercel env add LOG_LEVEL
-```
+For tools with predictable output, such as weather, the backend can construct the final user response directly from the tool result rather than making an additional LLM call.
 
-> Use **Vercel's dashboard → Settings → Environment Variables** as an alternative to the CLI.
+### Prompt caching
 
-### 5 — Deploy to preview
+For OpenAI calls, a stable tenant-aware prompt cache key is supplied where supported. Telemetry captures cached-input usage so cache effectiveness can be measured.
 
-```bash
-vercel
-```
+### Output token limits
 
-Vercel returns a preview URL. Test it fully before promoting to production.
-
-### 6 — Deploy to production
-
-```bash
-vercel --prod
-```
-
-### 7 — Post-deployment checks
-
-```bash
-# Health check
-curl https://your-project.vercel.app/health
-
-# Voice chat smoke test
-curl -X POST https://your-project.vercel.app/api/voice-chat \
-  -H "Content-Type: application/json" \
-  -d '{"session_id": "smoke-001", "text": "Are you online?"}'
-```
-
-### Vercel Deployment Notes
-
-- **Serverless cold starts:** FastAPI initializes the LangGraph DAG and DB pool on first invocation. Warm-up latency is ~1–2 s. Use Vercel's **Fluid Compute** or keep-alive pings if sub-second cold starts are required.
-- **Redis:** Use Redis Cloud or Upstash (Vercel Marketplace) — local Redis is not reachable from Vercel Functions.
-- **PostgreSQL:** Use Neon, Supabase, or any cloud Postgres with pgvector support. Vercel Postgres (powered by Neon) is the easiest integration.
-- **Timeout:** Default Vercel Function timeout is 10 s. LLM calls can exceed this — set `"maxDuration": 30` in `vercel.json` for the `/api/voice-chat` function if needed.
-- **CORS:** Set `CORS_ORIGINS` to your Vercel production URL to prevent browser blocks.
+Each tenant can define a maximum output token count to prevent unnecessarily long voice responses and unexpected token spend.
 
 ---
 
-## Contributing
+## Cost and usage telemetry
 
-1. Fork the repository and create a feature branch: `git checkout -b feat/your-feature`
-2. Write tests for any new agent nodes or routes.
-3. Ensure `pytest tests/ -v` passes with no failures.
-4. Run `ruff check . && ruff format .` before committing.
-5. Open a pull request with a clear description of the change.
+The LiteLLM routing layer captures available usage information for each model call, including:
+
+- selected model
+- input tokens
+- output tokens
+- cached input tokens
+- estimated LLM cost
+- call latency
+- fallback usage
+
+This creates the foundation for future reporting such as:
+
+```text
+Tenant: acme-medical
+Channel: phone
+Conversation: 8m 14s
+LLM calls: 19
+Input tokens: 12,408
+Cached input tokens: 4,812
+Output tokens: 1,322
+Estimated LLM cost: $0.0012
+Fallbacks: 0
+```
+
+A persistent tenant usage ledger is still recommended before enforcing hard monthly budgets.
 
 ---
 
-## License
+## Google Calendar and Gmail
 
-MIT © 2026 Robert — see [LICENSE](LICENSE) for details.
+The project includes Google authentication, Calendar, and Gmail services.
+
+For a single MunAI demo tenant, the current setup can be used as-is with local credentials. Before allowing multiple external customers to connect private Google accounts, implement:
+
+1. tenant-scoped OAuth credentials and token storage,
+2. encrypted secret storage,
+3. tenant-level authorization checks,
+4. audit logging for sensitive actions.
+
+Do not use globally shared Google tokens for unrelated production tenants.
+
+---
+
+## Production readiness
+
+The current codebase is intentionally described as a **production-oriented multi-tenant scaffold**, not a finished regulated production platform.
+
+Before onboarding multiple customers with private data, the next production-hardening priorities are:
+
+1. **Tenant-scoped OAuth/token storage** for Google integrations.
+2. **Shared pending/session state** rather than process-local memory when running multiple backend instances.
+3. **Persistent usage ledger** for tenant cost reporting and monthly budget enforcement.
+4. **Centralized secrets management** for provider and tenant credentials.
+5. **Centralized observability and audit logging.**
+6. **Authentication and authorization** around tenant administration and customer APIs.
+7. **Automated tests and CI/CD quality gates** before deployment.
+
+### Infrastructure we should add only when justified
+
+A future SaaS deployment may use:
+
+- PostgreSQL for tenants, usage records, audit metadata, and OAuth references.
+- Redis or another shared short-lived store for session/pending confirmation state.
+- A managed secret store for credentials.
+- Central logging/metrics for cost, latency, error, and fallback monitoring.
+
+A vector database or RAG pipeline should **not** be added simply because it was part of an earlier architecture concept. Add retrieval infrastructure only when a concrete customer knowledge use case requires it.
+
+---
+
+## Demo vs. production configuration
+
+The same lightweight runtime can support two operating modes:
+
+### Demo / pilot
+
+Use a single tenant with:
+
+- GPT-5 nano
+- browser Web Speech
+- optional Vapi phone demo
+- weather/calendar/email features as needed
+- local configuration
+- minimal infrastructure
+
+### Multi-tenant SaaS
+
+Use the same core code with:
+
+- one configuration entry per tenant
+- tenant-specific assistant branding
+- tenant-specific model and token limits
+- capability controls
+- Vapi assistant mappings
+- trusted caller configuration
+- persistent tenant usage and OAuth storage as the platform scales
+
+This approach prevents MunAI from paying for production infrastructure before customer volume requires it.
+
+---
+
+## Security notes
+
+- Never commit `.env`, OAuth tokens, provider keys, or tenant secrets.
+- Keep write/action tools behind confirmation flows where appropriate.
+- Treat phone caller identity as a signal, not strong authentication by itself.
+- Validate tenant resolution on every request.
+- Keep logs free of unnecessary message content and credentials.
+- Use a managed secret store before deploying customer credentials at scale.
+
+---
+
+## Git workflow
+
+Before pushing the cost-optimized implementation:
+
+```powershell
+cd C:\Users\rober\voice_ai_agent
+
+git status
+git diff
+```
+
+Run your local smoke tests and start the assistant. Once validated:
+
+```powershell
+git add .
+git commit -m "Add cost optimized multi-tenant voice AI architecture"
+git push
+```
+
+Review `git status` carefully before committing to make sure local credentials, tokens, and temporary files are not staged.
+
+---
+
+## Roadmap
+
+See [`ROADMAP.md`](ROADMAP.md) for planned work.
+
+The immediate production priorities are tenant-scoped OAuth, persistent usage accounting, shared session state, centralized secrets, and automated testing/CI.
+
+---
+
+## MunAI Solutions
+
+MunAI Voice AI Agent is being developed as a configurable SaaS foundation for customer-facing voice assistants, business automation, and AI-enabled service workflows.
+
+## Vercel demo capabilities
+
+The Vercel demo is designed to expose three browser capabilities:
+
+- **Weather** — Open-Meteo with wttr.in fallback. No weather API key is required.
+- **Live web search** — OpenAI Responses API built-in web search, using `gpt-5-nano` by default.
+- **Gmail (read-only)** — list unread/recent email and read a selected message. The demo intentionally cannot send, archive, delete, label, or otherwise modify mail.
+
+### Required Vercel environment variables
+
+Set these under **Vercel Project → Settings → Environment Variables** for Production (and Preview if desired):
+
+```text
+OPENAI_API_KEY=...
+GOOGLE_TOKEN_JSON_B64=...
+```
+
+Optional fallback/search configuration:
+
+```text
+OPENROUTER_API_KEY=...
+WEB_SEARCH_MODEL=gpt-5-nano
+WEB_SEARCH_CALL_COST_USD=0.01
+```
+
+Do not commit `.env`, `api/.secrets/token.json`, or Google OAuth client secrets. They are intentionally ignored by Git.
+
+### Put the local Google token into Vercel safely
+
+After `python scripts/google_setup.py` has created `api/.secrets/token.json`, generate a single-line Base64 value in PowerShell:
+
+```powershell
+$bytes = [System.IO.File]::ReadAllBytes("api\.secrets\token.json")
+[Convert]::ToBase64String($bytes)
+```
+
+Copy only the resulting Base64 string into the Vercel environment variable `GOOGLE_TOKEN_JSON_B64`. The authorized-user JSON contains the refresh token needed for serverless cold starts. Treat it as a secret.
+
+After changing Vercel environment variables, redeploy so the new deployment receives them.

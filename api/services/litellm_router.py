@@ -1,14 +1,7 @@
 # ============================================================
-# LiteLLM Router — service layer
-# Voice AI Agent (Low/No-Cost Edition)
+# LiteLLM Router — cost-instrumented service layer
 # ============================================================
-# Owns *how* to call a chat model reliably: provider wiring, the fallback
-# attempt, tool-call plumbing, and turning failure into a structured result.
-#
-# It owns none of the *why*. Persona, model choice, which tools exist, what
-# they do, and what the user hears on failure are all domain policy and live
-# in `api/core/`, passed in explicitly by the caller.
-
+import json
 import logging
 import os
 import time
@@ -18,98 +11,61 @@ import litellm
 from litellm import completion, get_llm_provider
 
 log = logging.getLogger(__name__)
-
-# How long a model is skipped after it fails, before being tried again.
-#
-# Without this, an out-of-credit or down provider gets retried on every
-# single request — each one pays a full network round trip to a call that's
-# certain to fail before the fallback is even tried. With a 2-hop tool
-# question (decide-to-call-tool, then compose-the-answer), that wasted round
-# trip happens twice per request. This doesn't fix a provider that's out of
-# credit — nothing here can — it just stops paying for the same doomed call
-# repeatedly while it stays that way.
-#
-# In-memory and process-local: correct for the single-user demo, and
-# consistent with the other in-memory, non-multi-tenant-safe state already in
-# this codebase (api/core/pending.py's confirmation store).
 _FAILURE_COOLDOWN_S = 30
 _recent_failures: dict[str, float] = {}
+litellm.drop_params = True
+
+_PROVIDER_ENV_VAR = {
+    "openai": "OPENAI_API_KEY",
+    "anthropic": "ANTHROPIC_API_KEY",
+    "openrouter": "OPENROUTER_API_KEY",
+}
 
 
 def _recently_failed(model: str) -> bool:
     failed_at = _recent_failures.get(model)
     return failed_at is not None and (time.time() - failed_at) < _FAILURE_COOLDOWN_S
 
-# Different providers/models accept different generation params — e.g.
-# claude-sonnet-5 direct via Anthropic rejects any temperature but 1, where
-# claude-haiku-4-5 accepts a range. Candy's persona sets one temperature for
-# every model uniformly (see CANDY_TEMPERATURE in api/core/persona.py), so
-# rather than hardcode per-model exceptions here, let litellm drop whatever a
-# given model doesn't support instead of erroring — the model's own default
-# stands in for the value that got dropped.
-litellm.drop_params = True
-
-# Which environment variable holds the key for a given litellm provider name.
-# A model string decides its own provider ("anthropic/..." vs
-# "openrouter/..."), so the primary and fallback model can each authenticate
-# against a different service without either one hardcoding the other's key.
-_PROVIDER_ENV_VAR = {
-    "anthropic": "ANTHROPIC_API_KEY",
-    "openrouter": "OPENROUTER_API_KEY",
-}
-
 
 def _api_key_for(model: str) -> tuple[str | None, str | None]:
-    """
-    Resolve the right key for a model's provider.
-
-    Read per call rather than at import time: an import-time read forces every
-    importer to guarantee `load_dotenv()` already ran, which is what made the
-    app entrypoint need its imports below the dotenv call.
-
-    Returns (key, error). error is set when the provider is known but its key
-    env var isn't — the caller can report that plainly instead of the request
-    failing deep inside the SDK with an auth error that doesn't name the cause.
-    """
     try:
         _, provider, _, _ = get_llm_provider(model)
     except Exception:
         provider = None
-
     env_var = _PROVIDER_ENV_VAR.get(provider)
     if env_var is None:
         return None, f"no known API key env var for provider {provider!r} (model {model!r})"
-
     key = os.getenv(env_var)
     if not key:
         return None, f"{env_var} is not set"
     return key, None
 
 
+def _usage_value(usage, name: str) -> int:
+    if usage is None:
+        return 0
+    if isinstance(usage, dict):
+        return int(usage.get(name) or 0)
+    return int(getattr(usage, name, 0) or 0)
+
+
 @dataclass(frozen=True)
 class LLMResult:
-    """
-    Structured outcome of a completion.
-
-    Callers must branch on `ok`. An earlier version returned the error text as
-    if it were the model's reply, so the route had no way to tell a real answer
-    from a failure — and spoke the exception aloud.
-
-    When the model wants a tool, `tool_calls` is populated and `text` is
-    usually empty. `assistant_message` is the raw turn to append to the
-    conversation before the tool results, which the provider requires.
-    """
-
     ok: bool
     text: str | None = None
     model: str | None = None
     error: str | None = None
     tool_calls: list = field(default_factory=list)
     assistant_message: dict | None = None
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cost_usd: float = 0.0
+    latency_ms: int = 0
+    fallback_used: bool = False
+    cached_input_tokens: int = 0
 
 
-def _attempt(*, api_key, model, messages, max_tokens, temperature, tools):
-    """One completion call. Raises on failure — the caller decides what that means."""
+def _attempt(*, api_key, model, messages, max_tokens, temperature, tools, prompt_cache_key=None):
     kwargs = dict(
         model=model,
         api_key=api_key,
@@ -120,12 +76,14 @@ def _attempt(*, api_key, model, messages, max_tokens, temperature, tools):
     if tools:
         kwargs["tools"] = tools
         kwargs["tool_choice"] = "auto"
+    if prompt_cache_key:
+        kwargs["prompt_cache_key"] = prompt_cache_key[:64]
 
+    started = time.perf_counter()
     response = completion(**kwargs)
+    latency_ms = round((time.perf_counter() - started) * 1000)
     choice = response["choices"][0]["message"]
 
-    # litellm returns a model object here; normalise to plain dicts so the
-    # rest of the app never depends on the SDK's types.
     calls = []
     for call in (getattr(choice, "tool_calls", None) or []):
         calls.append({
@@ -142,57 +100,79 @@ def _attempt(*, api_key, model, messages, max_tokens, temperature, tools):
             for c in calls
         ]
 
-    return choice.get("content"), calls, assistant
+    usage = getattr(response, "usage", None) or response.get("usage")
+    input_tokens = _usage_value(usage, "prompt_tokens")
+    output_tokens = _usage_value(usage, "completion_tokens")
+    details = None
+    if usage is not None:
+        details = usage.get("prompt_tokens_details") if isinstance(usage, dict) else getattr(usage, "prompt_tokens_details", None)
+    cached_input_tokens = _usage_value(details, "cached_tokens")
+    try:
+        cost_usd = float(litellm.completion_cost(completion_response=response) or 0.0)
+    except Exception:
+        cost_usd = 0.0
+
+    return (choice.get("content"), calls, assistant, input_tokens,
+            output_tokens, cached_input_tokens, cost_usd, latency_ms)
 
 
-def complete_messages(
-    *,
-    messages: list,
-    model: str,
-    max_tokens: int,
-    temperature: float,
-    fallback_model: str | None = None,
-    tools: list | None = None,
-) -> LLMResult:
-    """
-    Run a completion over an explicit message list, optionally offering tools.
+def _emit_cost_event(*, model: str, input_tokens: int, output_tokens: int,
+                     cached_input_tokens: int, cost_usd: float, latency_ms: int,
+                     fallback_used: bool) -> None:
+    log.info("llm_cost %s", json.dumps({
+        "model": model,
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "cached_input_tokens": cached_input_tokens,
+        "cost_usd": round(cost_usd, 8),
+        "latency_ms": latency_ms,
+        "fallback_used": fallback_used,
+    }, separators=(",", ":")))
 
-    This is the composable primitive: a tool loop needs to send the whole
-    conversation back each turn, which a system-prompt-plus-one-string call
-    cannot express.
-    """
+
+def complete_messages(*, messages: list, model: str, max_tokens: int,
+                      temperature: float, fallback_model: str | None = None,
+                      tools: list | None = None, prompt_cache_key: str | None = None) -> LLMResult:
     attempts = [model] + ([fallback_model] if fallback_model else [])
     errors: list[str] = []
 
-    for candidate in attempts:
+    for index, candidate in enumerate(attempts):
         if _recently_failed(candidate):
-            log.info("Skipping %s: failed within the last %ds", candidate, _FAILURE_COOLDOWN_S)
             errors.append(f"{candidate}: skipped (failed recently)")
             continue
 
-        # Resolved per candidate: the primary and fallback model can each
-        # belong to a different provider, so each needs its own key.
         api_key, key_error = _api_key_for(candidate)
         if key_error:
-            # Worth separating from a call failure: this one is a deploy
-            # problem, not a flaky provider, and retrying won't fix it — so
-            # skip straight to the next candidate instead of calling out.
             log.warning("Skipping %s: %s", candidate, key_error)
             errors.append(f"{candidate}: {key_error}")
             continue
 
         try:
-            text, calls, assistant = _attempt(
-                api_key=api_key,
-                model=candidate,
-                messages=messages,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                tools=tools,
+            text, calls, assistant, in_tok, out_tok, cached_tok, cost, latency = _attempt(
+                api_key=api_key, model=candidate, messages=messages,
+                max_tokens=max_tokens, temperature=temperature, tools=tools,
+                prompt_cache_key=prompt_cache_key,
             )
             _recent_failures.pop(candidate, None)
-            return LLMResult(ok=True, text=text, model=candidate,
-                             tool_calls=calls, assistant_message=assistant)
+            fallback_used = index > 0
+            _emit_cost_event(model=candidate, input_tokens=in_tok,
+                             output_tokens=out_tok, cached_input_tokens=cached_tok,
+                             cost_usd=cost, latency_ms=latency,
+                             fallback_used=fallback_used)
+            # A model can technically return a successful HTTP response with
+            # neither text nor a tool call. Do not propagate that as an empty
+            # voice response; try the fallback model instead.
+            if not calls and not (text or "").strip():
+                errors.append(f"{candidate}: empty response")
+                log.warning("LLM returned empty response on %s; trying fallback", candidate)
+                continue
+
+            return LLMResult(
+                ok=True, text=text, model=candidate, tool_calls=calls,
+                assistant_message=assistant, input_tokens=in_tok,
+                output_tokens=out_tok, cost_usd=cost, latency_ms=latency,
+                fallback_used=fallback_used, cached_input_tokens=cached_tok,
+            )
         except Exception as exc:
             log.warning("LLM call failed on %s: %s", candidate, exc)
             errors.append(f"{candidate}: {exc}")
@@ -201,23 +181,14 @@ def complete_messages(
     return LLMResult(ok=False, error=" | ".join(errors))
 
 
-def complete_chat(
-    *,
-    system_prompt: str,
-    user_text: str,
-    model: str,
-    max_tokens: int,
-    temperature: float,
-    fallback_model: str | None = None,
-) -> LLMResult:
-    """Single-turn convenience wrapper over `complete_messages`."""
+def complete_chat(*, system_prompt: str, user_text: str, model: str,
+                  max_tokens: int, temperature: float,
+                  fallback_model: str | None = None) -> LLMResult:
     return complete_messages(
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_text},
         ],
-        model=model,
-        max_tokens=max_tokens,
-        temperature=temperature,
+        model=model, max_tokens=max_tokens, temperature=temperature,
         fallback_model=fallback_model,
     )
