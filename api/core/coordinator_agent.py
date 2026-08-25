@@ -8,7 +8,7 @@ from datetime import datetime
 
 from agents.task_graph import get_ready_tasks, mark_complete
 from api.core import pending
-from api.core.fast_paths import deterministic_reply
+from api.core.fast_paths import deterministic_reply, explicit_web_search_query
 from api.core.persona import (
     CANDY_FAILURE_LINE,
     CANDY_FALLBACK_MODEL,
@@ -22,7 +22,7 @@ from api.core.specialist_llama import SpecialistLLaMA
 from api.core.test_agent import TestAgent
 from api.core.tools import available_tools, dispatch
 from api.core.tenant_config import TenantSettings
-from api.services import google_calendar
+from api.services import google_calendar, web_search
 from api.services.litellm_router import complete_messages
 
 log = logging.getLogger(__name__)
@@ -141,6 +141,31 @@ class CoordinatorAgent:
         if fast is not None:
             return AgentReply(ok=True, message=fast, cost_path="deterministic")
 
+        # Explicit search requests should never depend on the chat model
+        # deciding whether to call a tool. Route them straight to live search.
+        capabilities = settings.capabilities if settings else None
+        search_query = explicit_web_search_query(user_text)
+        search_enabled = (capabilities or {}).get("web_search", True)
+        if search_query and search_enabled:
+            result = web_search.search(search_query)
+            if not result.ok:
+                log.warning("Direct web search failed: %s", result.error)
+                return AgentReply(
+                    ok=False,
+                    message="I couldn't search the web just then. Please try again in a moment.",
+                    cost_path="web_search_direct",
+                )
+            return AgentReply(
+                ok=True,
+                message=result.answer,
+                model="web-search",
+                input_tokens=result.input_tokens,
+                output_tokens=result.output_tokens,
+                cost_usd=result.estimated_cost_usd,
+                llm_calls=1,
+                cost_path="web_search_direct",
+            )
+
         now = datetime.now().astimezone()
         system = dated_persona(
             now.strftime("%A, %d %B %Y"), str(now.tzinfo),
@@ -157,7 +182,6 @@ class CoordinatorAgent:
             *(history or []),
             {"role": "user", "content": user_text},
         ]
-        capabilities = settings.capabilities if settings else None
         offered = available_tools(trusted=trusted, capabilities=capabilities)
 
         total_in = total_out = total_cached = total_latency = calls_count = 0
