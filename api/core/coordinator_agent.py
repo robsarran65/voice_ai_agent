@@ -107,7 +107,14 @@ class CoordinatorAgent:
                 fallback_model=CANDY_FALLBACK_MODEL,
                 max_tokens=CANDY_MAX_TOKENS,
                 temperature=CANDY_TEMPERATURE,
-                tools=offered,
+                # Only the first hop can call a tool. Every one of Candy's
+                # flows is look-up-then-answer, never a chain of tools in one
+                # turn, so hop 1 is always composing the final reply — and on
+                # at least one fallback model (DeepSeek v3 via OpenRouter),
+                # simply having tools attached to that call cost an extra
+                # ~3s even though it never used one. Measured: 6.78s with
+                # tools present on the compose call vs 3.82s without.
+                tools=offered if hop == 0 else None,
             )
 
             if not result.ok:

@@ -11,12 +11,34 @@
 
 import logging
 import os
+import time
 from dataclasses import dataclass, field
 
 import litellm
 from litellm import completion, get_llm_provider
 
 log = logging.getLogger(__name__)
+
+# How long a model is skipped after it fails, before being tried again.
+#
+# Without this, an out-of-credit or down provider gets retried on every
+# single request — each one pays a full network round trip to a call that's
+# certain to fail before the fallback is even tried. With a 2-hop tool
+# question (decide-to-call-tool, then compose-the-answer), that wasted round
+# trip happens twice per request. This doesn't fix a provider that's out of
+# credit — nothing here can — it just stops paying for the same doomed call
+# repeatedly while it stays that way.
+#
+# In-memory and process-local: correct for the single-user demo, and
+# consistent with the other in-memory, non-multi-tenant-safe state already in
+# this codebase (api/core/pending.py's confirmation store).
+_FAILURE_COOLDOWN_S = 30
+_recent_failures: dict[str, float] = {}
+
+
+def _recently_failed(model: str) -> bool:
+    failed_at = _recent_failures.get(model)
+    return failed_at is not None and (time.time() - failed_at) < _FAILURE_COOLDOWN_S
 
 # Different providers/models accept different generation params — e.g.
 # claude-sonnet-5 direct via Anthropic rejects any temperature but 1, where
@@ -143,6 +165,11 @@ def complete_messages(
     errors: list[str] = []
 
     for candidate in attempts:
+        if _recently_failed(candidate):
+            log.info("Skipping %s: failed within the last %ds", candidate, _FAILURE_COOLDOWN_S)
+            errors.append(f"{candidate}: skipped (failed recently)")
+            continue
+
         # Resolved per candidate: the primary and fallback model can each
         # belong to a different provider, so each needs its own key.
         api_key, key_error = _api_key_for(candidate)
@@ -163,11 +190,13 @@ def complete_messages(
                 temperature=temperature,
                 tools=tools,
             )
+            _recent_failures.pop(candidate, None)
             return LLMResult(ok=True, text=text, model=candidate,
                              tool_calls=calls, assistant_message=assistant)
         except Exception as exc:
             log.warning("LLM call failed on %s: %s", candidate, exc)
             errors.append(f"{candidate}: {exc}")
+            _recent_failures[candidate] = time.time()
 
     return LLMResult(ok=False, error=" | ".join(errors))
 
