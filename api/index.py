@@ -3,6 +3,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.routes.health import router as health_router
+from api.routes.phone import router as phone_router
 from api.routes.voice_chat import router as voice_chat_router
 
 # Safe below the imports now: the LLM service reads OPENROUTER_API_KEY per
@@ -27,6 +28,8 @@ app.add_middleware(
 # ------------------------------------------------------------
 app.include_router(voice_chat_router, prefix="/voice-chat")
 app.include_router(health_router, prefix="/health")
+# Dormant until VAPI_SERVER_SECRET is set — see api/routes/phone.py.
+app.include_router(phone_router, prefix="/phone")
 
 
 @app.get("/")
@@ -38,7 +41,7 @@ async def root():
     """
     return {
         "message": "This is the Voice AI Agent API, not the UI.",
-        "endpoints": ["/health/", "/voice-chat/"],
+        "endpoints": ["/health/", "/voice-chat/", "/phone/chat/completions"],
         "frontend": "Serve frontend/index.html with its own static server.",
     }
 

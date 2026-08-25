@@ -10,8 +10,9 @@
 # cancels the proposal.
 #
 # In-memory and process-local, which is correct for the single-user demo and
-# explicitly NOT correct for multi-tenant use — see roadmap item 5. Swapping
-# this for Redis is a change to this file alone.
+# explicitly NOT correct for multi-tenant use — see ROADMAP.md item 4's
+# "Still open for SaaS" note. Swapping this for Redis is a change to this
+# file alone.
 
 import time
 from dataclasses import dataclass

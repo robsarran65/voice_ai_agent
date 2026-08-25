@@ -69,6 +69,43 @@ client product with email/calendar capabilities, modeled in part on `C:\Users\ro
    teal circuitry as the mark. To rebrand for another client, edit only the `--brand-*` block
    at the top of the stylesheet and swap the two files in `frontend/assets/`; nothing below
    that block hardcodes a brand colour.
+8. **Phone number — built, not activated.** `api/routes/phone.py` is Vapi's "custom LLM"
+   adapter: Vapi owns the phone number, call audio, STT and TTS, and POSTs a plain HTTP
+   request per turn (OpenAI `/chat/completions` shape) that this endpoint answers using the
+   same `CoordinatorAgent` the browser uses. No persistent connection on our side — this is
+   why Vapi and not a raw telephony provider (Telnyx/Twilio + a WebSocket audio bridge):
+   those need a held-open connection, which doesn't run on Vercel. Vapi's own docs publish a
+   Vercel serverless example of this exact pattern; Retell (the other batteries-included
+   option checked) explicitly rules out serverless in its own docs.
+   - **Ships fully dormant.** `VAPI_SERVER_SECRET` and `CANDY_ALLOWED_CALLERS` in `.env` are
+     both blank. Unset secret → every request gets 401, regardless of anything else. Empty
+     allowlist → nobody is trusted, so calendar/email stay hidden even once authorized —
+     weather still answers for anyone, since it isn't sensitive.
+   - **Caller-ID allowlist, not a lock.** `CANDY_ALLOWED_CALLERS` is a comma-separated list of
+     E.164 numbers permitted to use calendar/email over the phone. Caller ID can be spoofed —
+     this is a deterrent matching the demo's current low-stakes use, not a real access control.
+     A PIN/passphrase gate would be the next step up if this becomes more than a personal demo.
+   - **Verified without any real Vapi account or spend** — every case below was a simulated
+     HTTP POST shaped like Vapi's documented request: dormant-by-default (401 with both vars
+     unset), wrong/missing secret (401), both accepted auth header styles succeed, an
+     untrusted caller's calendar question gets a natural deflection with the tool never
+     offered, an allowlisted caller gets a real calendar answer, and a two-turn exchange
+     confirmed `history` actually carries prior turns (Candy recalled a fact stated one turn
+     earlier) rather than being accepted and silently ignored.
+   - **One real unknown, flagged rather than guessed past:** Vapi's own docs disagree with
+     themselves on where the caller's number lives in the payload — their Call-object schema
+     says `customer.number`, their own spam-call-rejection example reads `from.phoneNumber`.
+     `_extract_caller_number()` in `phone.py` tries both. Confirm which one (or both) a real
+     call actually sends during activation and simplify once known.
+   - **To activate:** create a Vapi account (pay-as-you-go, a few dollars covers real testing —
+     no large free credit, unlike the DIY telephony route that was considered and passed over
+     for the Vercel-compatibility reason above), set the assistant's Custom LLM URL to
+     `<public-url>/phone/chat/completions`, set that same secret as `VAPI_SERVER_SECRET`, add
+     trusted numbers to `CANDY_ALLOWED_CALLERS`, buy a number in Vapi, place a real call.
+   - **Does not fix item 1** (mobile/Bluetooth browser STT) — that's Candy's existing *web* UI
+     failing to capture speech in the browser; this is a wholly separate phone number people
+     dial directly. Real phone audio does need server-side STT/TTS same as item 1's proposed
+     fix would, but Vapi supplies that itself here, so item 1 remains open and unrelated.
 
 ## Service-layer pass (done)
 

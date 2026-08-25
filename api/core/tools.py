@@ -153,19 +153,34 @@ MAIL_READ_TOOL = {
 }
 
 
-def available_tools() -> list:
+# Calendar and email touch the user's private data, so they're the tools a
+# phone call gates on caller trust. Weather isn't sensitive and stays
+# available to anyone — a stranger asking Candy for the forecast learns
+# nothing about the person she belongs to.
+_SENSITIVE_TOOLS = {
+    "list_calendar_events", "propose_calendar_event", "list_email", "read_email",
+}
+
+
+def available_tools(trusted: bool = True) -> list:
     """
     The tools Candy can currently use.
 
     Computed per call, not a constant: the Google tools are only offered once
     a token actually carries their scopes. Offering a tool that cannot run
     just invites the model to promise something it can't do.
+
+    `trusted` defaults to True, so every existing caller (the browser demo,
+    which has no concept of caller identity — access is physically gated by
+    who's at the keyboard) is unaffected. It exists for the phone adapter,
+    which sets it to False for any caller not on the allowlist.
     """
     tools = [WEATHER_TOOL]
-    if google_calendar.is_ready():
-        tools += [CALENDAR_READ_TOOL, CALENDAR_WRITE_TOOL]
-    if google_gmail.is_ready():
-        tools += [MAIL_LIST_TOOL, MAIL_READ_TOOL]
+    if trusted:
+        if google_calendar.is_ready():
+            tools += [CALENDAR_READ_TOOL, CALENDAR_WRITE_TOOL]
+        if google_gmail.is_ready():
+            tools += [MAIL_LIST_TOOL, MAIL_READ_TOOL]
     return tools
 
 
@@ -271,13 +286,23 @@ _HANDLERS = {
 }
 
 
-def dispatch(name: str, raw_arguments: str, session_id: str = "") -> dict:
+def dispatch(name: str, raw_arguments: str, session_id: str = "", trusted: bool = True) -> dict:
     """
     Run one tool call and return a JSON-serialisable result.
 
     Never raises: a tool that blows up should become a result the model can
     talk about, not an exception that kills the whole turn.
+
+    `trusted` is checked again here, not just in `available_tools()`. Not
+    offering a tool is not a security boundary by itself — a model isn't
+    guaranteed to only ever call what it was offered, the same reasoning
+    behind deciding calendar-write consent in plain code rather than
+    trusting the model to interpret "yes" (see api/core/pending.py).
     """
+    if name in _SENSITIVE_TOOLS and not trusted:
+        log.warning("Refused %s for an untrusted caller", name)
+        return {"ok": False, "reason": "This isn't available for this caller."}
+
     handler = _HANDLERS.get(name)
     if handler is None:
         log.warning("Model asked for unknown tool %r", name)

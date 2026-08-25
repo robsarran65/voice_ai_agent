@@ -67,12 +67,34 @@ class CoordinatorAgent:
             "TestAgent": TestAgent(),
         }
 
-    def respond(self, user_text: str, session_id: str = "") -> AgentReply:
+    def respond(
+        self,
+        user_text: str,
+        session_id: str = "",
+        history: list | None = None,
+        trusted: bool = True,
+    ) -> AgentReply:
         """
         Answer the user's spoken text, using tools when the model asks for them.
 
         Holds no per-request state, so the module-level instance in the route
         is safe to share across concurrent requests (roadmap item 5).
+
+        `history` and `trusted` exist for the phone adapter and are no-ops for
+        every existing caller:
+          - `history`: prior turns of this same conversation, as
+            {"role": "user"|"assistant", "content": ...} dicts, oldest first.
+            The browser only ever asks one fresh question per request, so it
+            never has any to pass. A phone call is genuinely one continuous
+            conversation — Vapi resends the whole transcript every turn — so
+            without this, Candy would forget everything said earlier in the
+            same call the moment a tool was involved.
+          - `trusted`: whether the caller has been identified as someone who
+            should get calendar/email access. The browser has no notion of
+            caller identity at all — access there is physically gated by who
+            is at the keyboard — so it defaults to True, unchanged from
+            before this parameter existed. The phone adapter sets it based on
+            a caller-ID allowlist.
         """
         # A staged calendar event is settled here, in code, before the model
         # is involved at all. Whether the user consented to a write is not a
@@ -94,9 +116,10 @@ class CoordinatorAgent:
         messages = [
             {"role": "system", "content": dated_persona(
                 now.strftime("%A, %d %B %Y"), str(now.tzinfo))},
+            *(history or []),
             {"role": "user", "content": user_text},
         ]
-        offered = available_tools()
+        offered = available_tools(trusted=trusted)
 
         # Bounded, because a model that keeps calling tools would otherwise
         # spin while someone waits for a spoken answer.
@@ -129,7 +152,7 @@ class CoordinatorAgent:
             messages.append(result.assistant_message)
             for call in result.tool_calls:
                 log.info("tool %s(%s)", call["name"], call["arguments"])
-                output = dispatch(call["name"], call["arguments"], session_id)
+                output = dispatch(call["name"], call["arguments"], session_id, trusted=trusted)
                 messages.append({
                     "role": "tool",
                     "tool_call_id": call["id"],
