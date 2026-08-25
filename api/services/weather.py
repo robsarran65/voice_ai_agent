@@ -5,21 +5,26 @@
 # owns no domain policy: the caller picks the units and decides what
 # Candy says about the result.
 #
-# Primary provider is wttr.in's JSON view (`?format=j1`), the same one
-# Jarvis 2 uses in `app/server.py` — free, no API key, no signup, and it
-# already returns human-readable descriptions ("Patchy rain nearby") so
-# nothing here has to map numeric weather codes to words.
+# Primary provider is Open-Meteo. wttr.in — the same provider Jarvis 2 uses
+# in `app/server.py`, free, no API key — was tried first originally, but a
+# live report surfaced two problems with it that Open-Meteo doesn't share:
+#   * its geocoding resolves a city to whatever ground station is physically
+#     nearest, which can be a specific neighbourhood rather than the city
+#     itself — asking for "Orlando" came back "Fairvilla, Florida" (a real
+#     Orlando neighbourhood, but confusing to hear back for a plain city
+#     name). Open-Meteo's geocoder returns proper administrative names.
+#   * its hourly data let this code build genuinely self-contradicting
+#     answers — see the comment in `_wttr()`. Open-Meteo's daily forecast is
+#     one provider-aggregated record per day, so a description and its rain
+#     chance can't come from two different hours by construction.
 #
-# Two things from Jarvis 2 are deliberately NOT carried over:
-#   * its regex that strips "weather/forecast/today/in/at..." out of the
-#     query to guess a location. Candy gets a clean city name from the
-#     model's tool call, so there is nothing to strip.
-#   * its placement inside a general web-search function. Weather is its
-#     own capability here, callable on its own.
-#
-# Open-Meteo is kept as a fallback because wttr.in rate-limits under load
-# and a demo that dies mid-question is worse than a second provider. This
-# mirrors the model fallback already in `litellm_router`.
+# wttr.in is kept as the fallback: it's still free and reliable, and two
+# providers is worth having regardless of which is more accurate, the same
+# reasoning behind the model fallback in `litellm_router`. One thing from
+# Jarvis 2 is deliberately NOT carried over: its regex that strips
+# "weather/forecast/today/in/at..." out of a sentence to guess a location.
+# Candy gets a clean city name from the model's tool call, so there is
+# nothing to strip.
 
 import logging
 from dataclasses import dataclass
@@ -80,16 +85,25 @@ def _wttr(city: str, fahrenheit: bool) -> WeatherResult:
     if len(days) > 1:
         day = days[1]
         hourly = day.get("hourly") or []
-        # Index 4 is midday on wttr's 3-hourly grid (00,03,...,21) — the
-        # single slot that best characterises "what tomorrow is like".
-        midday = hourly[4] if len(hourly) > 4 else (hourly[0] if hourly else {})
-        rain = [int(h.get("chanceofrain", 0) or 0) for h in hourly] or [0]
+        if hourly:
+            # Picking the midday hour's description but the WHOLE DAY's peak
+            # rain chance produced self-contradicting answers — "sunny" paired
+            # with "92% chance of rain" — because those two numbers came from
+            # different hours (midday looked clear; the actual risk was
+            # overnight). Reporting one hour's description together with
+            # THAT SAME hour's rain chance keeps the two numbers consistent,
+            # and using the hour with the peak rain chance means the answer
+            # leads with the day's real weather risk instead of glossing over
+            # it with an optimistic snapshot.
+            peak = max(hourly, key=lambda h: int(h.get("chanceofrain", 0) or 0))
+        else:
+            peak = {}
         tomorrow = {
             "date": day.get("date"),
             "high": day.get("maxtempF" if fahrenheit else "maxtempC"),
             "low": day.get("mintempF" if fahrenheit else "mintempC"),
-            "conditions": (midday.get("weatherDesc") or [{}])[0].get("value", ""),
-            "precipitation_chance": max(rain),
+            "conditions": (peak.get("weatherDesc") or [{}])[0].get("value", ""),
+            "precipitation_chance": int(peak.get("chanceofrain", 0) or 0),
             "unit": "F" if fahrenheit else "C",
         }
 
@@ -171,7 +185,7 @@ def get_weather(city: str, *, fahrenheit: bool = True) -> WeatherResult:
         return WeatherResult(ok=False, error="no city given")
 
     errors = []
-    for name, fetch in (("wttr.in", _wttr), ("open-meteo", _open_meteo)):
+    for name, fetch in (("open-meteo", _open_meteo), ("wttr.in", _wttr)):
         try:
             result = fetch(city, fahrenheit)
             if result.ok:
