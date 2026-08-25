@@ -1,0 +1,9 @@
+[tool.vercel]
+# Vercel's FastAPI auto-detection only looks for an `app` object at
+# app.py/index.py/server.py/main.py/wsgi.py/asgi.py under the project root,
+# src/, or app/ (confirmed against Vercel's current docs). This app has
+# always lived at api/index.py to match the api/core, api/services,
+# api/routes layout used everywhere else in this project — this override
+# points Vercel there directly instead of moving the file to fit their
+# default convention.
+entrypoint = "api.index:app"

@@ -1,6 +1,9 @@
+import os
+
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from api.routes.health import router as health_router
 from api.routes.phone import router as phone_router
@@ -31,22 +34,24 @@ app.include_router(health_router, prefix="/health")
 # Dormant until VAPI_SERVER_SECRET is set — see api/routes/phone.py.
 app.include_router(phone_router, prefix="/phone")
 
-
-@app.get("/")
-async def root():
-    """
-    This API does not serve the frontend UI locally (only Vercel's
-    routing does that). Run `frontend/index.html` through its own
-    static server and point it at this API instead.
-    """
-    return {
-        "message": "This is the Voice AI Agent API, not the UI.",
-        "endpoints": ["/health/", "/voice-chat/", "/phone/chat/completions"],
-        "frontend": "Serve frontend/index.html with its own static server.",
-    }
-
+# ------------------------------------------------------------
+# FRONTEND
+# ------------------------------------------------------------
+# Vercel's current model is one Python function for the whole app — there's
+# no separate static-build step to hand frontend/ to anymore (the previous
+# vercel.json did that via the now-deprecated "builds"/"@vercel/static"
+# config). Mounted last, so it only catches requests the routers above
+# didn't already claim; html=True serves index.html for "/".
+#
+# An absolute path, not "frontend": Vercel's function runtime's working
+# directory isn't guaranteed to be the repo root, so a relative path here
+# would be a bug that only shows up in production.
+_FRONTEND_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "frontend")
+app.mount("/", StaticFiles(directory=_FRONTEND_DIR, html=True), name="frontend")
 
 # ------------------------------------------------------------
 # Vercel requires a handler named "app"
 # ------------------------------------------------------------
-# Nothing else needed — Vercel will import this file
+# Nothing else needed — Vercel will import this file (see pyproject.toml's
+# [tool.vercel] entrypoint, since api/index.py isn't one of Vercel's
+# default-detected entrypoint locations).
