@@ -15,7 +15,14 @@
 # BOTH files or the two environments will quietly diverge.
 name = "candy-voice-ai-agent"
 version = "0.1.0"
-requires-python = ">=3.13"
+# Upper-bounded, not just ">=3.13": Vercel's build picked the newest version
+# satisfying an open-ended constraint (3.14), and pydantic-core's Rust
+# extension can't yet build there — its PyO3 tooling caps out at 3.13
+# (confirmed from the actual build failure: "PyO3's maximum supported
+# version: 0.24.1 ... 3.13"). 3.13 also matches this project's local dev
+# interpreter, so this pins prod and local to the same version rather than
+# just dodging the immediate failure.
+requires-python = ">=3.13,<3.14"
 dependencies = [
     "fastapi==0.116.1",
     "uvicorn==0.35.0",
