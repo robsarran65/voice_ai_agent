@@ -18,6 +18,8 @@
 #     write is the difference between a prompt-injected email being able to
 #     embarrass you and being able to act as you.
 
+import base64
+import json
 import logging
 import os
 
@@ -42,37 +44,65 @@ SETUP_HINT = (
 )
 
 
+def _env_token_info() -> dict | None:
+    """Load Google authorized-user credentials from Vercel-friendly env vars.
+
+    Prefer GOOGLE_TOKEN_JSON_B64 because it is easy to paste into hosting
+    dashboards without newline/quote escaping problems. GOOGLE_TOKEN_JSON is
+    supported as a plain JSON alternative.
+    """
+    raw_b64 = (os.getenv("GOOGLE_TOKEN_JSON_B64") or "").strip()
+    raw_json = (os.getenv("GOOGLE_TOKEN_JSON") or "").strip()
+    try:
+        if raw_b64:
+            return json.loads(base64.b64decode(raw_b64).decode("utf-8"))
+        if raw_json:
+            return json.loads(raw_json)
+    except Exception as exc:
+        log.warning("Could not parse Google token environment variable: %s", exc)
+    return None
+
+
+def _load_credentials() -> tuple[Credentials | None, bool]:
+    """Return (credentials, came_from_file)."""
+    info = _env_token_info()
+    if info:
+        return Credentials.from_authorized_user_info(info), False
+    if os.path.exists(TOKEN_PATH):
+        return Credentials.from_authorized_user_file(TOKEN_PATH), True
+    return None, False
+
+
 def is_authorized() -> bool:
-    return os.path.exists(TOKEN_PATH)
+    creds, _ = _load_credentials()
+    return creds is not None
 
 
 def has_scope(scope: str) -> bool:
-    """
-    Whether token.json actually carries a given scope.
-
-    Reads the scopes recorded IN THE FILE rather than assuming SCOPES — a
-    token written before a scope was added simply won't have it, and the
-    honest answer is False rather than a failure at call time.
-    """
-    if not os.path.exists(TOKEN_PATH):
-        return False
+    """Whether the deployed credential actually carries a given scope."""
     try:
-        creds = Credentials.from_authorized_user_file(TOKEN_PATH)
-        return scope in (creds.scopes or [])
+        creds, _ = _load_credentials()
+        return creds is not None and scope in (creds.scopes or [])
     except Exception as exc:
         log.warning("Could not read token scopes: %s", exc)
         return False
 
 
 def get_credentials() -> Credentials:
-    if not os.path.exists(TOKEN_PATH):
+    creds, came_from_file = _load_credentials()
+    if creds is None:
         raise RuntimeError(SETUP_HINT)
-    # No SCOPES override — use whatever the token was actually granted.
-    creds = Credentials.from_authorized_user_file(TOKEN_PATH)
     if creds.expired and creds.refresh_token:
         creds.refresh(Request())
-        with open(TOKEN_PATH, "w", encoding="utf-8") as f:
-            f.write(creds.to_json())
+        # Local development can persist a refreshed access token. Hosted
+        # serverless environments use the refresh token from the environment
+        # on each cold start and never need to write secrets to disk.
+        if came_from_file:
+            try:
+                with open(TOKEN_PATH, "w", encoding="utf-8") as f:
+                    f.write(creds.to_json())
+            except OSError as exc:
+                log.warning("Could not persist refreshed Google token: %s", exc)
     return creds
 
 
