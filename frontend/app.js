@@ -19,6 +19,10 @@ const consoleHint = document.getElementById("console-hint");
 const notice = document.getElementById("notice");
 const noticeTitle = document.getElementById("notice-title");
 const noticeBody = document.getElementById("notice-body");
+const textAskForm = document.getElementById("text-ask-form");
+const textAskInput = document.getElementById("text-ask-input");
+const textAskBtn = document.getElementById("text-ask-btn");
+const replayBtn = document.getElementById("replay-btn");
 
 // Confirmed via testing that no delay length fixes word-dropping on a
 // Bluetooth mic (tried up to 2.5s) — it's an OS/Bluetooth-stack
@@ -66,12 +70,23 @@ function showNotice(title, body) {
 // Audio priming (shared by mic input and TTS output)
 // -------------------------------
 let audioCtx = null;
+let speechUnlocked = false;
+let activeUtterance = null;
 function getAudioCtx() {
     const Ctx = window.AudioContext || window.webkitAudioContext;
     if (!Ctx) return null;
     if (!audioCtx) audioCtx = new Ctx();
     if (audioCtx.state === "suspended") audioCtx.resume();
     return audioCtx;
+}
+
+function unlockSpeech() {
+    getAudioCtx();
+    if (!("speechSynthesis" in window) || speechUnlocked) return;
+    const primer = new SpeechSynthesisUtterance(" ");
+    primer.volume = 0;
+    window.speechSynthesis.speak(primer);
+    speechUnlocked = true;
 }
 
 // NOTE: we tried grabbing the mic via getUserMedia ahead of time (both
@@ -148,6 +163,7 @@ if ("webkitSpeechRecognition" in window) {
         setText(agentBox, reply.message);
         replyPanel.dataset.ok = String(reply.ok);
         replyMeta.textContent = reply.meta;
+        replayBtn.hidden = !reply.message;
 
         // Speak agent response
         speak(reply.message);
@@ -206,18 +222,17 @@ if ("webkitSpeechRecognition" in window) {
         if (["starting", "listening"].includes(orb.dataset.state)) setStage("idle");
     };
 } else {
-    // Roadmap item 1: iOS Safari has no webkitSpeechRecognition at all, so
-    // this is the state most phone users land in. An alert() left the page
-    // looking broken; an explanation on the page tells them what to do.
+    // iOS browsers may not expose speech recognition, but typed questions
+    // keep the full assistant and spoken-answer experience available.
     startBtn.disabled = true;
     stopBtn.disabled = true;
     setStage("blocked");
     // Telling someone to press a button that is disabled reads as a bug.
-    consoleLead.textContent = "Candy can't listen in this browser.";
-    consoleHint.textContent = "The controls stay disabled until you open the demo somewhere speech capture is available.";
+    consoleLead.textContent = "Type a question for Candy.";
+    consoleHint.textContent = "Voice input isn't available here, but Candy can still answer and speak aloud.";
     showNotice(
-        "This browser can't capture speech",
-        "Candy's voice input uses the Chrome speech recognition API, which isn't available here — including on iPhone and iPad, where every browser uses Safari's engine underneath. Open this page in Chrome on a desktop to run the demo."
+        "Voice input isn't available in this browser",
+        "Type your question below and tap Ask. Candy's answer will appear and play aloud; tap Hear answer if iPhone blocks automatic playback."
     );
 }
 
@@ -226,6 +241,7 @@ if ("webkitSpeechRecognition" in window) {
 // -------------------------------
 startBtn.onclick = () => {
     if (!listening) {
+        unlockSpeech();
         listening = true;
         notice.hidden = true;
         recognition.start();
@@ -233,6 +249,32 @@ startBtn.onclick = () => {
         stopBtn.disabled = false;
     }
 };
+
+async function askCandy(text) {
+    unlockSpeech();
+    setText(transcriptBox, text);
+    setStage("thinking");
+    textAskBtn.disabled = true;
+    const reply = await sendToBackend(text);
+    setText(agentBox, reply.message);
+    replyPanel.dataset.ok = String(reply.ok);
+    replyMeta.textContent = reply.meta;
+    replayBtn.hidden = !reply.message;
+    textAskBtn.disabled = false;
+    speak(reply.message);
+}
+
+textAskForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const text = textAskInput.value.trim();
+    if (!text) return;
+    await askCandy(text);
+});
+
+replayBtn.addEventListener("click", () => {
+    unlockSpeech();
+    speak(agentBox.textContent);
+});
 
 // -------------------------------
 // Stop Listening
@@ -358,6 +400,10 @@ function warmAudioDevice() {
 }
 
 function speak(text) {
+    if (!("speechSynthesis" in window) || !text) {
+        setStage("idle");
+        return;
+    }
     warmAudioDevice();
     const utterance = new SpeechSynthesisUtterance(text);
     if (ttsVoice) utterance.voice = ttsVoice;
@@ -366,7 +412,16 @@ function speak(text) {
     // Drive the orb from the utterance itself rather than guessing at a
     // duration, so the animation stops exactly when Candy stops talking.
     utterance.onstart = () => setStage("speaking");
-    utterance.onend = () => setStage("idle");
-    utterance.onerror = () => setStage("idle");
-    speechSynthesis.speak(utterance);
+    utterance.onend = () => {
+        activeUtterance = null;
+        setStage("idle");
+    };
+    utterance.onerror = () => {
+        activeUtterance = null;
+        setStage("idle");
+    };
+    activeUtterance = utterance; // iOS can drop an utterance that is garbage-collected.
+    speechSynthesis.cancel();
+    speechSynthesis.resume();
+    speechSynthesis.speak(activeUtterance);
 }

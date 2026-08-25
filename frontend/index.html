@@ -62,6 +62,14 @@
                 <button id="start-btn" class="btn btn--primary" type="button">Talk to Candy</button>
                 <button id="stop-btn" class="btn btn--ghost" type="button" disabled>Stop</button>
             </div>
+
+            <form class="text-ask" id="text-ask-form">
+                <label class="visually-hidden" for="text-ask-input">Type a question for Candy</label>
+                <input id="text-ask-input" class="text-ask__input" type="text"
+                       autocomplete="off" enterkeyhint="send"
+                       placeholder="Or type a question" required>
+                <button class="btn btn--primary" id="text-ask-btn" type="submit">Ask</button>
+            </form>
         </div>
     </section>
 
@@ -82,12 +90,13 @@
             <p class="panel__body" id="agent-response" data-empty="true"
                data-placeholder="Candy's reply appears here, and is spoken aloud."></p>
             <span class="panel__meta" id="reply-meta"></span>
+            <button id="replay-btn" class="btn btn--ghost replay-btn" type="button" hidden>Hear answer</button>
         </article>
     </section>
 
     <footer class="colophon">
         <span class="colophon__tag">Candy — a MunAI Solutions demo build</span>
-        <span class="colophon__note">Needs Chrome on desktop · iPhone and iPad aren't supported yet</span>
+        <span class="colophon__note">Voice input works where supported · Type-to-ask works on iPhone and iPad</span>
     </footer>
 
 </main>
